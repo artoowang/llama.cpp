@@ -1,10 +1,20 @@
 #!/usr/bin/env python
 from guidance import gen, models, select, user, assistant, system
 
+import colorlog
 import guidance
+import logging
 import pdb
 
 PATH_TO_MODEL = "../models/Mistral-7B-Instruct-v0.2/mistral-7b-instruct-v0.2-q4_k.gguf"
+
+_logger = logging.getLogger(__name__)
+_logger.setLevel(logging.INFO)
+_log_handler = colorlog.StreamHandler()
+_log_handler.setFormatter(colorlog.ColoredFormatter(
+    "%(log_color)s%(asctime)s - %(levelname)s:%(name)s:%(reset)s %(message)s"
+))
+_logger.addHandler(_log_handler)
 
 
 class MistralChat(models.LlamaCpp, models.Chat):
@@ -73,7 +83,7 @@ model = MistralChat(
     PATH_TO_MODEL, n_ctx=4096, verbose=True, n_gpu_layers=-1)
 
 with user():
-    model += """You are a smart home agent named Jarvis, powered by
+    system_prompt = """You are a smart home agent named Jarvis, powered by
 Home Assistant.
 
 Following are the entities in this smart home:
@@ -112,6 +122,9 @@ and update the JSON fields by:
 * Setting response to a sentence responding to the user's message.
 
 """
+    model += system_prompt
+    _logger.info(f"System prompt:\n{system_prompt}")
+
     # model += "What is the current temperature?"
     model += "What is the current temperature in kitchen and bedroom?"
     # model += "Turn on all switches."
@@ -125,10 +138,14 @@ with assistant():
 }}
 """
 
-print(model)
+_logger.debug(f"Model state:\n{model}")
 
 action = model["action"]
 entities = model["entities"]
 response = model["response"]
 
-print(f"action: {action}\nentities: {entities}\nresponse: {response}")
+_logger.info(f"""Result:
+action: {action}
+entities: {entities}
+response: {response}
+""")
