@@ -76,7 +76,7 @@ _model = MistralChat(
 
 
 @guidance
-def generate_entities(lm):
+def generate_entities(lm: models.Model) -> models.Model:
     lm = lm.remove("entities")
     while True:
         # Generate a double quoted entitit ID, and store the quoted string in a
@@ -122,29 +122,29 @@ Name,ID,State
 """
 
 
-# TODO: Should I rewrite this as a @guidance function?
-def parse_assistant_response(model: models.Model) -> models.Model:
+@guidance
+def parse_assistant_response(lm: models.Model) -> models.Model:
     with assistant():
         _logger.info(f"Processing ...")
-        model += f"""
+        lm += f"""
 {{
     "action": "{select(["none", "turn_on", "turn_off", "toggle"], name="action")}",
     "entities": [{generate_entities()}],
     "response": "{gen(name="response", max_tokens=256, stop='"')}"
 }}
 """
-    _logger.debug(f"Model state:\n{model}")
+    _logger.debug(f"Model state:\n{lm}")
 
-    action = model["action"]
-    entities = model["entities"]
-    response = model["response"]
+    action = lm["action"]
+    entities = lm["entities"]
+    response = lm["response"]
 
     _logger.info(f"""Result:
 action: {action}
 entities: {entities}
 response: {response}
 """)
-    return model
+    return lm
 
 
 # Send the initial prompt.
@@ -172,7 +172,7 @@ Send the user a one line greeting, with no action and no entities.
     _model += system_prompt
 
 # Parse the intial response. Should be a greeting.
-_model = parse_assistant_response(_model)
+_model += parse_assistant_response()
 
 # Start user loop.
 while True:
@@ -183,4 +183,4 @@ while True:
             break
         _model += user_prompt
 
-    _model = parse_assistant_response(_model)
+    _model += parse_assistant_response()
