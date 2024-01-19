@@ -3,10 +3,10 @@ from guidance import (
     # Modules.
     models,
     # Libraries.
+    capture,
     char_set,
     gen,
     one_or_more,
-    zero_or_more,
     # Grammars.
     select,
     # Roles.
@@ -38,13 +38,18 @@ def entity_name(lm: models.Model) -> models.Model:
 
 @guidance(stateless=True)
 def entity_id(lm: models.Model) -> models.Model:
-    lm += entity_domain() + "." + entity_name()
+    lm += capture(entity_domain() + "." + entity_name(), "entity_id")
     return lm
 
 
 @guidance(stateless=True)
+def zero_or_more(model, value):
+    return model + select(["", value], recurse=True)
+
+
+@guidance(stateless=True)
 def entity_id_list(lm: models.Model) -> models.Model:
-    lm += "[" + zero_or_more(entity_id() + select(["", ", "])) + "]"
+    lm += "[" + zero_or_more(capture(entity_id(), "__LIST_APPEND:entity_id_list") + select(["", ", "])) + "]"
     return lm
 
 
@@ -81,3 +86,7 @@ The IDs of all switches are {entity_id_list()}
 """
 
 print(_model)
+print(f"""
+entity_id: {_model["entity_id"]}
+entity_id_list: {_model["entity_id_list"]}
+""")
