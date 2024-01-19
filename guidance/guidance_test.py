@@ -9,12 +9,21 @@ import pdb
 PATH_TO_MODEL = "../models/Mistral-7B-Instruct-v0.2/mistral-7b-instruct-v0.2-q4_k.gguf"
 
 _logger = logging.getLogger(__name__)
-_logger.setLevel(logging.INFO)
+_logger.setLevel(logging.DEBUG)
+
 _log_handler = colorlog.StreamHandler()
 _log_handler.setFormatter(colorlog.ColoredFormatter(
     "%(log_color)s%(asctime)s - %(levelname)s:%(name)s:%(reset)s %(message)s"
 ))
+_log_handler.setLevel(logging.INFO)
 _logger.addHandler(_log_handler)
+
+_file_handler = logging.FileHandler("guidance_test.log", mode="w")
+_file_handler.setLevel(logging.DEBUG)
+_file_handler.setFormatter(logging.Formatter(
+    "%(asctime)s - %(levelname)s:%(name)s: %(message)s"
+))
+_logger.addHandler(_file_handler)
 
 
 class MistralChat(models.LlamaCpp, models.Chat):
@@ -64,6 +73,7 @@ class MistralChat(models.LlamaCpp, models.Chat):
 
 @guidance
 def generate_entities(lm):
+    lm = lm.remove("entities")
     while True:
         # Generate a double quoted entitit ID, and store the quoted string in a
         # list.
@@ -82,8 +92,8 @@ def generate_entities(lm):
 model = MistralChat(
     PATH_TO_MODEL, n_ctx=4096, verbose=True, n_gpu_layers=-1)
 
-with user():
-    system_prompt = """You are a smart home agent named Jarvis, powered by
+system_prompt: str | None = """
+You are a smart home agent named Jarvis, powered by
 Home Assistant.
 
 Following are the entities in this smart home:
@@ -122,29 +132,36 @@ and update the JSON fields by:
 * Setting response to a sentence responding to the user's message.
 
 """
-    model += system_prompt
-    _logger.info(f"System prompt:\n{system_prompt}")
+_logger.info(f"System prompt:\n{system_prompt}")
 
-    # model += "What is the current temperature?"
-    model += "What is the current temperature in kitchen and bedroom?"
-    # model += "Turn on all switches."
+while True:
+    with user():
+        if system_prompt is not None:
+            model += system_prompt
+            system_prompt = None
+        user_prompt = input("User: ")
+        if len(user_prompt) == 0:
+            _logger.info("Exitting ...")
+            break
+        model += user_prompt
 
-with assistant():
-    model += f"""
-{{
-    "action": "{select(["none", "turn_on", "turn_off", "toggle"], name="action")}",
-    "entities": [{generate_entities()}],
-    "response": "{gen(name="response", max_tokens=256, stop='"')}"
-}}
-"""
+    with assistant():
+        _logger.info(f"Processing ...")
+        model += f"""
+    {{
+        "action": "{select(["none", "turn_on", "turn_off", "toggle"], name="action")}",
+        "entities": [{generate_entities()}],
+        "response": "{gen(name="response", max_tokens=256, stop='"')}"
+    }}
+    """
 
-_logger.debug(f"Model state:\n{model}")
+    _logger.debug(f"Model state:\n{model}")
 
-action = model["action"]
-entities = model["entities"]
-response = model["response"]
+    action = model["action"]
+    entities = model["entities"]
+    response = model["response"]
 
-_logger.info(f"""Result:
+    _logger.info(f"""Result:
 action: {action}
 entities: {entities}
 response: {response}
