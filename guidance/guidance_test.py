@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+from datetime import datetime
 from guidance import gen, models, select, user, assistant, system
 
 import colorlog
@@ -93,8 +94,9 @@ def generate_entities(lm: models.Model) -> models.Model:
     return lm
 
 
-def get_home_states() -> str:
-    return """
+@guidance(stateless=True)
+def update_home_states(lm: models.Model) -> models.Model:
+    update_prompt = """
 Following are the latest entity states in this smart home:
 
 Name,ID,State
@@ -120,13 +122,14 @@ Name,ID,State
 "Air Purifier","switch.aukey_air_purifier","unknown"
 "Entry Light","switch.entry_light","off"
 """
+    _logger.info(f"Home states updated with:\n{update_prompt}")
+    return lm + update_prompt
 
 
 @guidance
 def parse_assistant_response(lm: models.Model) -> models.Model:
-    with assistant():
-        _logger.info(f"Processing ...")
-        lm += f"""
+    _logger.info(f"Processing ...")
+    lm += f"""
 {{
     "action": "{select(["none", "turn_on", "turn_off", "toggle"], name="action")}",
     "entities": [{generate_entities()}],
@@ -149,11 +152,13 @@ response: {response}
 
 # Send the initial prompt.
 with user():
-    system_prompt = f"""
+    _model += """
 You are a smart home agent named Jarvis, powered by
 Home Assistant.
 
-{get_home_states()}
+"""
+    _model += update_home_states()
+    _model += f"""
 
 Here are the valid actions:
 turn_off, turn_on, toggle
@@ -168,11 +173,10 @@ and update the JSON fields by:
 Send the user a one line greeting, with no action and no entities.
 
 """
-    _logger.info(f"System prompt:\n{system_prompt}")
-    _model += system_prompt
 
 # Parse the intial response. Should be a greeting.
-_model += parse_assistant_response()
+with assistant():
+    _model += parse_assistant_response()
 
 # Start user loop.
 while True:
@@ -181,6 +185,16 @@ while True:
         if len(user_prompt) == 0:
             _logger.info("Exitting ...")
             break
+
+        # TODO: Test updating the states when the user prompt starts with "UPDATE".
+        # This adds a fake sensor.test called "Test sensor", with its value set to the current timestamp.
+        if user_prompt.startswith("UPDATE"):
+            _model += update_home_states()
+            test_sensor_prompt = f'"Test sensor",sensor.test,"{datetime.now().timestamp()}"\n'
+            _logger.info(f"Adding test sensor state: {test_sensor_prompt}")
+            _model += test_sensor_prompt
+
         _model += user_prompt
 
-    _model += parse_assistant_response()
+    with assistant():
+        _model += parse_assistant_response()
