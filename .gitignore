@@ -106,5 +106,3 @@ poetry.toml
 /tests/test-rope
 /tests/test-backend-ops
 
-# My own directories.
-/guidance/
