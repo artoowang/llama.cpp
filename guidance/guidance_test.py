@@ -71,6 +71,10 @@ class MistralChat(models.LlamaCpp, models.Chat):
             assert False, f"Unrecognized role: {role_name}"
 
 
+_model = MistralChat(
+    PATH_TO_MODEL, n_ctx=4096, verbose=True, n_gpu_layers=-1)
+
+
 @guidance
 def generate_entities(lm):
     lm = lm.remove("entities")
@@ -89,14 +93,9 @@ def generate_entities(lm):
     return lm
 
 
-model = MistralChat(
-    PATH_TO_MODEL, n_ctx=4096, verbose=True, n_gpu_layers=-1)
-
-system_prompt: str | None = """
-You are a smart home agent named Jarvis, powered by
-Home Assistant.
-
-Following are the entities in this smart home:
+def get_home_states() -> str:
+    return """
+Following are the latest entity states in this smart home:
 
 Name,ID,State
 "Date & Time","sensor.date_time","2024-01-14, 00:58"
@@ -119,42 +118,21 @@ Name,ID,State
 "Bedroom Temperature","sensor.bedroom_temperature","55.3"
 "Espresso Machine","switch.aukey_espresso","unknown"
 "Air Purifier","switch.aukey_air_purifier","unknown"
-"Entry Light","switch.entry_light","off" 
-
-Here is the valid action List:
-turn_off, turn_on, toggle
-
-Respond to the user messages with the following JSON template: 
-{"action": "", "entities": [], "response": ""}
-and update the JSON fields by:
-* Setting action to one of the Action List item, or empty if none of the actions apply.
-* Setting entities to the entities IDs (not names) related to the user message.
-* Setting response to a sentence responding to the user's message.
-
+"Entry Light","switch.entry_light","off"
 """
-_logger.info(f"System prompt:\n{system_prompt}")
 
-while True:
-    with user():
-        if system_prompt is not None:
-            model += system_prompt
-            system_prompt = None
-        user_prompt = input("User: ")
-        if len(user_prompt) == 0:
-            _logger.info("Exitting ...")
-            break
-        model += user_prompt
 
+# TODO: Should I rewrite this as a @guidance function?
+def parse_assistant_response(model: models.Model) -> models.Model:
     with assistant():
         _logger.info(f"Processing ...")
         model += f"""
-    {{
-        "action": "{select(["none", "turn_on", "turn_off", "toggle"], name="action")}",
-        "entities": [{generate_entities()}],
-        "response": "{gen(name="response", max_tokens=256, stop='"')}"
-    }}
-    """
-
+{{
+    "action": "{select(["none", "turn_on", "turn_off", "toggle"], name="action")}",
+    "entities": [{generate_entities()}],
+    "response": "{gen(name="response", max_tokens=256, stop='"')}"
+}}
+"""
     _logger.debug(f"Model state:\n{model}")
 
     action = model["action"]
@@ -166,3 +144,43 @@ action: {action}
 entities: {entities}
 response: {response}
 """)
+    return model
+
+
+# Send the initial prompt.
+with user():
+    system_prompt = f"""
+You are a smart home agent named Jarvis, powered by
+Home Assistant.
+
+{get_home_states()}
+
+Here are the valid actions:
+turn_off, turn_on, toggle
+
+Respond to the user messages with the following JSON template: 
+{{"action": "turn_on", "entities": ["switch.mos_eisley","switch.aukey_espresso"], "response": ""}}
+and update the JSON fields by:
+* Setting action to one of the Action List item, or empty if none of the actions apply.
+* Setting entities to the entities IDs (not names) related to the user message.
+* Setting response to a sentence responding to the user's message.
+
+Send the user a one line greeting, with no action and no entities.
+
+"""
+    _logger.info(f"System prompt:\n{system_prompt}")
+    _model += system_prompt
+
+# Parse the intial response. Should be a greeting.
+_model = parse_assistant_response(_model)
+
+# Start user loop.
+while True:
+    with user():
+        user_prompt = input("User: ")
+        if len(user_prompt) == 0:
+            _logger.info("Exitting ...")
+            break
+        _model += user_prompt
+
+    _model = parse_assistant_response(_model)
