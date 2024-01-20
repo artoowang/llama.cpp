@@ -1,6 +1,17 @@
 #!/usr/bin/env python
 from datetime import datetime
-from guidance import gen, models, select, user, assistant, system
+from guidance import (
+    # Modules.
+    models,
+    # Libraries.
+    capture,
+    gen,
+    # Grammars.
+    select,
+    # Roles.
+    assistant,
+    user,
+)
 
 import colorlog
 import guidance
@@ -8,6 +19,34 @@ import logging
 import pdb
 
 PATH_TO_MODEL = "../models/Mistral-7B-Instruct-v0.2/mistral-7b-instruct-v0.2-q4_k.gguf"
+DOMAINS = [
+    "binary_sensor",
+    "sensor",
+    "switch",
+]
+ENTITIES = [
+    "sensor.date_time",
+    "sensor.random_number",
+    "switch.tv",
+    "switch.mos_eisley",
+    "sensor.kitchen_temperature",
+    "sensor.kitchen_humidity",
+    "sensor.kitchen_pm25",
+    "sensor.kitchen_co2",
+    "sensor.utility_kwh",
+    "sensor.utility_watts",
+    "binary_sensor.hallway_occupancy",
+    "binary_sensor.bedroom_occupancy",
+    "sensor.hallway_temperature",
+    "sensor.hallway_humidity",
+    "sensor.hallway_air_quality_index",
+    "sensor.hallway_voc",
+    "sensor.hallway_co2",
+    "sensor.bedroom_temperature",
+    "switch.aukey_espresso",
+    "switch.aukey_air_purifier",
+    "switch.entry_light",
+]
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.DEBUG)
@@ -64,6 +103,7 @@ class MistralChat(models.LlamaCpp, models.Chat):
             return "</s>"
 
     def _check_current_msg_id(self, role_name):
+        assert self._current_msg_id is not None
         if role_name == "user":
             assert self._current_msg_id % 2 == 0
         elif role_name == "assistant":
@@ -76,26 +116,51 @@ _model = MistralChat(
     PATH_TO_MODEL, n_ctx=4096, verbose=True, n_gpu_layers=-1)
 
 
+@guidance(stateless=True)
+def entity_id(lm: models.Model) -> models.Model:
+    lm += select(ENTITIES)
+    return lm
+
+
 @guidance
-def generate_entities(lm: models.Model) -> models.Model:
-    lm = lm.remove("entities")
+def entity_id_list(lm: models.Model) -> models.Model:
+    MAX_NUM_ENTITIES = 10
+    lm = lm.remove("entity_id_list")
+    num_generated = 0
     while True:
-        # Generate a double quoted entitit ID, and store the quoted string in a
-        # list.
-        lm += ('"' +
-               gen(name="entities", list_append=True, max_tokens=10, stop='"') +
-               '"')
-        # Generate the delimiter: if it is the end of the list "]", then stop.
-        lm += gen(max_tokens=10, stop=[",", "]"], save_stop_text="stop")
-        if lm["stop"] == "]":
+        lm += select([capture(entity_id(), "__LIST_APPEND:entity_id_list") + ", ", ""])
+        entities = lm.get("entity_id_list", default=[])
+        new_num_generated = len(entities)
+        if new_num_generated == num_generated:
+            # Model has stopped generating a new entity ID, and we are done.
             break
-        # Otherwise, add the delimiter and proceed to the next entity.
-        lm += ", "
+        num_generated = new_num_generated
+        if num_generated >= MAX_NUM_ENTITIES:
+            _logger.warning("We have reached the maximum number of entities "
+                            f"for entity_id_list(): {MAX_NUM_ENTITIES}")
+            break
+
+    if lm["entity_id_list"] is None:
+        # Nothing has been generated, so the list is None.
+        # TODO: Currently we can't initialize with
+        # lm = lm.set("entity_id_list", []) before the loop, since capture()
+        # seems to have issue working with that.
+        return lm.set("entity_id_list", [])
+
+    # Detect and potentially remove duplicates
+    entities = lm["entity_id_list"]
+    entities_no_duplicates = list(set(entities))
+    num_duplicates = len(entities) - len(entities_no_duplicates)
+    if num_duplicates > 0:
+        _logger.warning(f"{num_duplicates} duplicate(s) have been removed.")
+        _logger.debug(f"entities: {entities}\nentities_no_duplicates: {entities_no_duplicates}")
+        lm = lm.set("entity_id_list", entities_no_duplicates)
+
     return lm
 
 
 @guidance(stateless=True)
-def update_home_states(lm: models.Model) -> models.Model:
+def current_home_states(lm: models.Model) -> models.Model:
     update_prompt = """
 Following are the latest entity states in this smart home:
 
@@ -122,31 +187,18 @@ Name,ID,State
 "Air Purifier","switch.aukey_air_purifier","unknown"
 "Entry Light","switch.entry_light","off"
 """
-    _logger.info(f"Home states updated with:\n{update_prompt}")
     return lm + update_prompt
 
 
 @guidance
-def parse_assistant_response(lm: models.Model) -> models.Model:
-    _logger.info(f"Processing ...")
+def assistant_response(lm: models.Model) -> models.Model:
+    newline = "\n"
     lm += f"""
-{{
-    "action": "{select(["none", "turn_on", "turn_off", "toggle"], name="action")}",
-    "entities": [{generate_entities()}],
-    "response": "{gen(name="response", max_tokens=256, stop='"')}"
-}}
+Action: {gen(stop=newline)}
+Entities: {entity_id_list()}
+Response: {gen(stop=newline)}
 """
-    _logger.debug(f"Model state:\n{lm}")
-
-    action = lm["action"]
-    entities = lm["entities"]
-    response = lm["response"]
-
-    _logger.info(f"""Result:
-action: {action}
-entities: {entities}
-response: {response}
-""")
+    _logger.info(f"Model state:\n{lm}\n")
     return lm
 
 
@@ -157,26 +209,39 @@ You are a smart home agent named Jarvis, powered by
 Home Assistant.
 
 """
-    _model += update_home_states()
+    _model += current_home_states()
     _model += f"""
 
 Here are the valid actions:
 turn_off, turn_on, toggle
 
-Respond to the user messages with the following JSON template: 
-{{"action": "turn_on", "entities": ["switch.mos_eisley","switch.aukey_espresso"], "response": ""}}
-and update the JSON fields by:
-* Setting action to one of the Action List item, or empty if none of the actions apply.
-* Setting entities to the entities IDs (not names) related to the user message.
-* Setting response to a sentence responding to the user's message.
+Respond to the user's message with the following:
+Action: the applicable action. If there is no action applicable, reply "none".
+Entities: the related entity IDs (not the entity names).
+Response: a sensentce responding to the user's message. 
 
-Send the user a one line greeting, with no action and no entities.
+For example:
+
+User:
+Turn on the entry light
+
+Assistant:
+Action: turn_on
+Entities: switch.entry_light, 
+Response: Sure, I have turned on the Entry Light.
 
 """
 
-# Parse the intial response. Should be a greeting.
 with assistant():
-    _model += parse_assistant_response()
+    _model += """
+Action: none
+Entities:
+Response: Hi, I am Jarvis, your smart home assistant. How may I help you?
+"""
+
+# TODO: For now, let's just print the model state entirely.
+# We might want to revisit this and just output useful text only.
+_logger.info(f"Model state:\n{_model}\n")
 
 # Start user loop.
 while True:
@@ -189,7 +254,7 @@ while True:
         # TODO: Test updating the states when the user prompt starts with "UPDATE".
         # This adds a fake sensor.test called "Test sensor", with its value set to the current timestamp.
         if user_prompt.startswith("UPDATE"):
-            _model += update_home_states()
+            _model += current_home_states()
             test_sensor_prompt = f'"Test sensor",sensor.test,"{datetime.now().timestamp()}"\n'
             _logger.info(f"Adding test sensor state: {test_sensor_prompt}")
             _model += test_sensor_prompt
@@ -197,4 +262,4 @@ while True:
         _model += user_prompt
 
     with assistant():
-        _model += parse_assistant_response()
+        _model += assistant_response()
