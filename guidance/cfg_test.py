@@ -54,28 +54,27 @@ _model = models.LlamaCpp(
     PATH_TO_MODEL, n_ctx=4096, verbose=True, n_gpu_layers=-1)
 
 
-@guidance(stateless=True)
-def entity_domain(lm: models.Model) -> models.Model:
-    lm += one_or_more(char_set("A-Za-z0-9_"))
-    return lm
+# @guidance(stateless=True)
+# def entity_domain(lm: models.Model) -> models.Model:
+#     lm += one_or_more(char_set("A-Za-z0-9_"))
+#     return lm
 
 
-@guidance(stateless=True)
-def entity_name(lm: models.Model) -> models.Model:
-    lm += one_or_more(char_set("A-Za-z0-9_"))
-    return lm
+# @guidance(stateless=True)
+# def entity_name(lm: models.Model) -> models.Model:
+#     lm += one_or_more(char_set("A-Za-z0-9_"))
+#     return lm
 
 
 @guidance(stateless=True)
 def entity_id(lm: models.Model) -> models.Model:
-    lm += capture(entity_domain() + "." + entity_name(), "entity_id")
+    lm += select(ENTITIES)
     return lm
 
 
 @guidance(stateless=True)
 def entity_id_list(lm: models.Model) -> models.Model:
-    lm += "[" + token_limit(zero_or_more(capture(entity_id(), "__LIST_APPEND:entity_id_list") +
-                            select(["", ", "])), 100) + "]"
+    lm += token_limit(zero_or_more(capture(entity_id(), "__LIST_APPEND:entity_id_list") + ", "), 100)
     return lm
 
 
@@ -109,11 +108,10 @@ The ID of Espresso Machine is switch.aukey_espresso
 """
 
 _model += f"The ID of the light is {entity_id()}\n"
-_model += "The IDs of all temperatures are [sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature]\n"
+_model += "The IDs of all temperatures are sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature, \n"
 _model += f"The IDs of all switches are {entity_id_list()}\n"
 
 print(_model)
 print(f"""
-entity_id: {_model["entity_id"]}
 entity_id_list: {_model["entity_id_list"]}
 """)
