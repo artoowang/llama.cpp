@@ -81,7 +81,7 @@ def entity_id_list_stateless(lm: models.Model) -> models.Model:
 @guidance
 def entity_id_list(lm: models.Model) -> models.Model:
     MAX_NUM_ENTITIES = 10
-    lm.remove("entity_id_list")
+    lm = lm.remove("entity_id_list")
     num_generated = 0
     while True:
         lm += select([capture(entity_id(), "__LIST_APPEND:entity_id_list") + ", ", ""])
@@ -109,6 +109,7 @@ def entity_id_list(lm: models.Model) -> models.Model:
     num_duplicates = len(entities) - len(entities_no_duplicates)
     if num_duplicates > 0:
         logging.warning(f"{num_duplicates} duplicate(s) have been removed.")
+        logging.debug(f"entities: {entities}\nentities_no_duplicates: {entities_no_duplicates}")
         lm = lm.set("entity_id_list", entities_no_duplicates)
 
     return lm
@@ -147,6 +148,7 @@ The ID of Espresso Machine is switch.aukey_espresso
 _model += "The IDs of all temperatures are sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature, \n"
 # _model += f"Repeat switch.tv 5 times: switch.tv, {entity_id_list()}\n"
 _model += f"The IDs of all switches are {entity_id_list()}\n"
+_model += f"The ID of the light is {entity_id_list()}\n"
 
 print(_model)
 print(f"""
