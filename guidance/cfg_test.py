@@ -73,8 +73,44 @@ def entity_id(lm: models.Model) -> models.Model:
 
 
 @guidance(stateless=True)
-def entity_id_list(lm: models.Model) -> models.Model:
+def entity_id_list_stateless(lm: models.Model) -> models.Model:
     lm += token_limit(zero_or_more(capture(entity_id(), "__LIST_APPEND:entity_id_list") + ", "), 100)
+    return lm
+
+
+@guidance
+def entity_id_list(lm: models.Model) -> models.Model:
+    MAX_NUM_ENTITIES = 10
+    lm.remove("entity_id_list")
+    num_generated = 0
+    while True:
+        lm += select([capture(entity_id(), "__LIST_APPEND:entity_id_list") + ", ", ""])
+        entities = lm.get("entity_id_list", default=[])
+        new_num_generated = len(entities)
+        if new_num_generated == num_generated:
+            # Model has stopped generating a new entity ID, and we are done.
+            break
+        num_generated = new_num_generated
+        if num_generated >= MAX_NUM_ENTITIES:
+            logging.warning("We have reached the maximum number of entities "
+                            f"for entity_id_list(): {MAX_NUM_ENTITIES}")
+            break
+
+    if lm["entity_id_list"] is None:
+        # Nothing has been generated, so the list is None.
+        # TODO: Currently we can't initialize with
+        # lm = lm.set("entity_id_list", []) before the loop, since capture()
+        # seems to have issue working with that.
+        return lm.set("entity_id_list", [])
+
+    # Detect and potentially remove duplicates
+    entities = lm["entity_id_list"]
+    entities_no_duplicates = list(set(entities))
+    num_duplicates = len(entities) - len(entities_no_duplicates)
+    if num_duplicates > 0:
+        logging.warning(f"{num_duplicates} duplicate(s) have been removed.")
+        lm = lm.set("entity_id_list", entities_no_duplicates)
+
     return lm
 
 
@@ -107,8 +143,9 @@ Name,ID,State
 The ID of Espresso Machine is switch.aukey_espresso
 """
 
-_model += f"The ID of the light is {entity_id()}\n"
+# _model += f"The ID of the light is {entity_id()}\n"
 _model += "The IDs of all temperatures are sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature, \n"
+# _model += f"Repeat switch.tv 5 times: switch.tv, {entity_id_list()}\n"
 _model += f"The IDs of all switches are {entity_id_list()}\n"
 
 print(_model)
