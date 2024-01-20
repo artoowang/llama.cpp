@@ -7,8 +7,10 @@ from guidance import (
     char_set,
     gen,
     one_or_more,
+    zero_or_more,
     # Grammars.
     select,
+    token_limit,
     # Roles.
     user, assistant
 )
@@ -19,6 +21,34 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 PATH_TO_MODEL = "../models/Mistral-7B-Instruct-v0.2/mistral-7b-instruct-v0.2-q4_k.gguf"
+DOMAINS = [
+    "binary_sensor",
+    "sensor",
+    "switch",
+]
+ENTITIES = [
+    "sensor.date_time",
+    "sensor.random_number",
+    "switch.tv",
+    "switch.mos_eisley",
+    "sensor.kitchen_temperature",
+    "sensor.kitchen_humidity",
+    "sensor.kitchen_pm25",
+    "sensor.kitchen_co2",
+    "sensor.utility_kwh",
+    "sensor.utility_watts",
+    "binary_sensor.hallway_occupancy",
+    "binary_sensor.bedroom_occupancy",
+    "sensor.hallway_temperature",
+    "sensor.hallway_humidity",
+    "sensor.hallway_air_quality_index",
+    "sensor.hallway_voc",
+    "sensor.hallway_co2",
+    "sensor.bedroom_temperature",
+    "switch.aukey_espresso",
+    "switch.aukey_air_purifier",
+    "switch.entry_light",
+]
 
 _model = models.LlamaCpp(
     PATH_TO_MODEL, n_ctx=4096, verbose=True, n_gpu_layers=-1)
@@ -43,13 +73,9 @@ def entity_id(lm: models.Model) -> models.Model:
 
 
 @guidance(stateless=True)
-def zero_or_more(model, value):
-    return model + select(["", value], recurse=True)
-
-
-@guidance(stateless=True)
 def entity_id_list(lm: models.Model) -> models.Model:
-    lm += "[" + zero_or_more(capture(entity_id(), "__LIST_APPEND:entity_id_list") + select(["", ", "])) + "]"
+    lm += "[" + token_limit(zero_or_more(capture(entity_id(), "__LIST_APPEND:entity_id_list") +
+                            select(["", ", "])), 100) + "]"
     return lm
 
 
@@ -80,10 +106,11 @@ Name,ID,State
 "Entry Light","switch.entry_light","off"
 
 The ID of Espresso Machine is switch.aukey_espresso
-The ID of the light is {entity_id()}
-The IDs of all temperatures are [sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature]
-The IDs of all switches are {entity_id_list()}
 """
+
+_model += f"The ID of the light is {entity_id()}\n"
+_model += "The IDs of all temperatures are [sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature]\n"
+_model += f"The IDs of all switches are {entity_id_list()}\n"
 
 print(_model)
 print(f"""
