@@ -13,7 +13,8 @@ from guidance import (
     user,
 )
 from homeassistant import (
-    entity_id_list,
+    assistant_response,
+    get_user_assistant_examples,
 )
 from mistral import (
     PATH_7B_INSTRUCT_0_2_Q4_K,
@@ -60,54 +61,32 @@ Name,ID,State
     return lm + update_prompt
 
 
-@guidance
-def assistant_response(lm: models.Model) -> models.Model:
-    newline = "\n"
-    lm += f"""
-Action: {gen(stop=newline)}
-Entities: {entity_id_list()}
-Response: {gen(stop=newline)}
-"""
-    _logger.info(f"Model state:\n{lm}\n")
-    return lm
-
-
 # Send the initial prompt.
 with user():
     _model += """
 You are a smart home agent named Jarvis, powered by
 Home Assistant.
-
 """
     _model += current_home_states()
     _model += f"""
-
-Here are the valid actions:
-turn_off, turn_on, toggle
-
-Respond to the user's message with the following:
-Action: the applicable action. If there is no action applicable, reply "none".
-Entities: the related entity IDs (not the entity names).
-Response: a sensentce responding to the user's message. 
-
-For example:
-
-User:
-Turn on the entry light
-
-Assistant:
-Action: turn_on
-Entities: switch.entry_light
-Response: Sure, I have turned on the Entry Light.
-
+Greet the user, and then answer the user's instructions.
 """
 
 with assistant():
     _model += """
-Action: none
-Entities:
-Response: Hi, I am Jarvis, your smart home assistant. How may I help you?
+Assistant: Hi, I am your smart home assistant. How may I help you?
 """
+
+# Add chat examples to the model.
+for example in get_user_assistant_examples():
+    if example["role"] == "user":
+        block = user
+    elif example["role"] == "assistant":
+        block = assistant
+    else:
+        assert False, f"Unrecognized role: {example['role']}"
+    with block():
+        _model += example["content"]
 
 # TODO: For now, let's just print the model state entirely.
 # We might want to revisit this and just output useful text only.
@@ -129,7 +108,11 @@ while True:
             _logger.info(f"Adding test sensor state: {test_sensor_prompt}")
             _model += test_sensor_prompt
 
-        _model += user_prompt
+        _model += f"User: {user_prompt}\n"
 
     with assistant():
+        _logger.info("Processing ...")
         _model += assistant_response()
+
+    _logger.debug(f"Model state:\n{_model}")
+    _logger.info(f"Response: {_model['response']}")
