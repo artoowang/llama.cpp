@@ -61,6 +61,18 @@ def entity_id_list_stateless(lm: models.Model) -> models.Model:
     return lm
 
 
+# TODO: it seems lm can be either a Model, Null, StatelessFunction, or something
+# else. For now, let's not assume its type.
+@guidance(stateless=True)
+def zero_or_more(lm, value, sep: str):
+    """
+    This is similar to guidance.zero_or_more(), but allows a seperator string in
+    between the generated values, while the last element won't have an
+    additional separator after it.
+    """
+    return lm + select(["", value + sep], recurse=True) + select(["", value])
+
+
 @guidance
 def entity_id_list(lm: models.Model) -> models.Model:
     MAX_NUM_ENTITIES = 10
@@ -70,7 +82,8 @@ def entity_id_list(lm: models.Model) -> models.Model:
     lm_start = lm
     num_generated = 0
     while True:
-        lm += select([capture(entity_id(), "__LIST_APPEND:entity_id_list") + ", ", ""])
+        entity = capture(entity_id(), "__LIST_APPEND:entity_id_list")
+        lm += zero_or_more(entity, sep=", ")
         entities = lm.get("entity_id_list", default=[])
         new_num_generated = len(entities)
         if new_num_generated == num_generated:
