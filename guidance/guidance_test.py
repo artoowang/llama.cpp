@@ -90,7 +90,7 @@ for example in get_user_assistant_examples():
 
 # TODO: For now, let's just print the model state entirely.
 # We might want to revisit this and just output useful text only.
-_logger.info(f"Model state:\n{_model}\n")
+_logger.info(f"Model state:\n{_model}")
 
 # Start user loop.
 while True:
@@ -102,17 +102,21 @@ while True:
 
         # TODO: Test updating the states when the user prompt starts with "UPDATE".
         # This adds a fake sensor.test called "Test sensor", with its value set to the current timestamp.
-        if user_prompt.startswith("UPDATE"):
-            _model += current_home_states()
-            test_sensor_prompt = f'"Test sensor",sensor.test,"{datetime.now().timestamp()}"\n'
-            _logger.info(f"Adding test sensor state: {test_sensor_prompt}")
-            _model += test_sensor_prompt
-
-        _model += f"User: {user_prompt}\n"
+        if user_prompt == "UPDATE":
+            _model += "User:\n" + current_home_states()
+            # test_sensor_prompt = f'"Test sensor",sensor.test,"{datetime.now().timestamp()}"\n'
+            # _logger.info(f"Adding test sensor state: {test_sensor_prompt}")
+            # _model += test_sensor_prompt
+        else:
+            _model += f"User: {user_prompt}\n"
 
     with assistant():
-        _logger.info("Processing ...")
-        _model += assistant_response()
+        if user_prompt == "UPDATE":
+            _logger.info("States have been updated.")
+            _model += "Assistant: Got it."
+        else:
+            _logger.info("Processing ...")
+            _model += assistant_response()
 
     _logger.debug(f"Model state:\n{_model}")
     _logger.info(f"Response: {_model['response']}")
