@@ -137,13 +137,9 @@ def service_or_none(model):
 
 
 @guidance
-def assistant_response(lm: Model, request) -> Model:
+def assistant_response(lm: Model) -> Model:
     """
-    Generates assistant response to the given user request.
-
-    The request is usually a given static string, but it can also be other
-    types of grammar, if it makes sense to have the model generats the user
-    request.
+    Generates assistant response based on the current model state.
 
     The response contains 3 lines: the applicable service,
     the relevant entity IDs, and a one liner describing the assistant response.
@@ -154,7 +150,6 @@ def assistant_response(lm: Model, request) -> Model:
     """
     newline = "\n"
     lm += f"""
-User: {request}
 Assistant:
   Service: {service_or_none()}
   Entities: {entity_id_list()}
@@ -168,23 +163,41 @@ Assistant:
     return lm
 
 
-@guidance(stateless=True)
-def user_assistant_examples(model):
+def get_user_assistant_examples() -> list[dict[str, str]]:
     """
     A few examples showing the how the assistant should respond to the user
     requests. The format of the response should match that of the
     assistant_response().
     """
-    return model + """
-User: What are the IDs of the temperature sensors?
-Assistant:
+    return [
+        {
+            "role": "user",
+            "content": "User: What are the IDs of the temperature sensors?",
+        },
+        {
+            "role": "assistant",
+            "content": """Assistant:
   Service: none
   Entities: sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature
   Reponse: The IDs are sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature
-
-User: Turn on TV
-Assistant:
+""",
+        },
+        {
+            "role": "user",
+            "content": "User: Turn on TV",
+        },
+        {
+            "role": "assistant",
+            "content": """Assistant:
   Service: homeassistant.turn_on
   Entities: switch.tv
   Reponse: TV has been turned on.
-"""
+""",
+        },
+    ]
+
+
+@guidance(stateless=True)
+def user_assistant_examples(model):
+    example_str = "\n".join([item["content"] for item in get_user_assistant_examples()])
+    return model + example_str

@@ -67,19 +67,22 @@ Greet the user, and then answer the user's instructions.
 Assistant: Hi, I am your smart home assistant. How may I help you?
 """ + user_assistant_examples()
 
-_model += assistant_response("What are the IDs of all switches?")
+_model += "User: What are the IDs of all switches?"
+_model += assistant_response()
 _logger.info(f"""Model state:
 {_model}
 Response: {_model["response"]}
 """)
 
-_model += assistant_response("What is the current temperature?")
+_model += "User: What is the current temperature?"
+_model += assistant_response()
 _logger.info(f"""Model state:
 {_model}
 Response: {_model["response"]}
 """)
 
-_model += assistant_response("Turn off all switches")
+_model += "User: Turn off all switches"
+_model += assistant_response()
 _logger.info(f"""Model state:
 {_model}
 Response: {_model["response"]}
