@@ -20,6 +20,7 @@ from homeassistant import (
     entity_id_list,
     entity_id_list_stateless,
     service_or_none,
+    user_assistant_examples,
 )
 from mistral import (
     PATH_7B_INSTRUCT_0_2_Q4_K,
@@ -64,24 +65,21 @@ Name,ID,State
 Greet the user, and then answer the user's instructions.
 
 Assistant: Hi, I am your smart home assistant. How may I help you?
+""" + user_assistant_examples()
 
-User: What are the IDs of the temperature sensors?
-Assistant:
-  Service: none
-  Entities: sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature
-  Reponse: The IDs are sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature
+_model += assistant_response("What are the IDs of all switches?")
+_logger.info(f"""Model state:
+{_model}
+Response: {_model["response"]}
+""")
 
-User: Turn on TV
-Assistant:
-  Service: homeassistant.turn_on
-  Entities: switch.tv
-  Reponse: TV has been turned on.
-"""
+_model += assistant_response("What is the current temperature?")
+_logger.info(f"""Model state:
+{_model}
+Response: {_model["response"]}
+""")
 
-# _model += assistant_response("What are the IDs of all switches?")
-# _model += assistant_response("What is the current temperature?")
 _model += assistant_response("Turn off all switches")
-
 _logger.info(f"""Model state:
 {_model}
 Response: {_model["response"]}

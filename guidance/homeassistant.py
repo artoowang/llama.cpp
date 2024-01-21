@@ -138,17 +138,53 @@ def service_or_none(model):
 
 @guidance
 def assistant_response(lm: Model, request) -> Model:
+    """
+    Generates assistant response to the given user request.
+
+    The request is usually a given static string, but it can also be other
+    types of grammar, if it makes sense to have the model generats the user
+    request.
+
+    The response contains 3 lines: the applicable service,
+    the relevant entity IDs, and a one liner describing the assistant response.
+
+    These 3 lines will be captured respectively into the model's servce,
+    entity_id_list, and response_text states, and are collected into a single
+    dictionary under the model's response state.
+    """
     newline = "\n"
     lm += f"""
 User: {request}
 Assistant:
   Service: {service_or_none()}
   Entities: {entity_id_list()}
-  Response: {gen(stop=newline, name="response")}
+  Response: {gen(stop=newline, name="response_text")}
 """
     lm = lm.set("response", {
         "service": lm["service"],
         "entities": lm["entity_id_list"],
-        "response": lm["response"],
+        "response": lm["response_text"],
     })
     return lm
+
+
+@guidance(stateless=True)
+def user_assistant_examples(model):
+    """
+    A few examples showing the how the assistant should respond to the user
+    requests. The format of the response should match that of the
+    assistant_response().
+    """
+    return model + """
+User: What are the IDs of the temperature sensors?
+Assistant:
+  Service: none
+  Entities: sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature
+  Reponse: The IDs are sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature
+
+User: Turn on TV
+Assistant:
+  Service: homeassistant.turn_on
+  Entities: switch.tv
+  Reponse: TV has been turned on.
+"""
