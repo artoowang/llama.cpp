@@ -148,12 +148,11 @@ def assistant_response(lm: Model) -> Model:
     entity_id_list, and response_text states, and are collected into a single
     dictionary under the model's response state.
     """
-    newline = "\n"
     lm += f"""
 Assistant:
   Service: {service_or_none()}
   Entities: {entity_id_list()}
-  Response: {gen(stop=newline, name="response_text")}
+  Response: "{gen(stop='"', name="response_text")}"
 """
     lm = lm.set("response", {
         "service": lm["service"],
@@ -179,7 +178,7 @@ def get_user_assistant_examples() -> list[dict[str, str]]:
             "content": """Assistant:
   Service: none
   Entities: sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature
-  Reponse: The IDs are sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature
+  Reponse: "The IDs are sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature"
 """,
         },
         {
@@ -191,7 +190,7 @@ def get_user_assistant_examples() -> list[dict[str, str]]:
             "content": """Assistant:
   Service: homeassistant.turn_on
   Entities: switch.tv
-  Reponse: TV has been turned on.
+  Reponse: "TV has been turned on."
 """,
         },
     ]
