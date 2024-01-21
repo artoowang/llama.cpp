@@ -21,6 +21,7 @@ from homeassistant import (
 )
 from mistral import (
     PATH_7B_INSTRUCT_0_2_Q4_K,
+    MistralChat,
 )
 
 import guidance
@@ -32,7 +33,8 @@ _model = models.LlamaCpp(
 
 
 _model += f"""
-Following are the latest entity states in a smart home:
+You are a smart home assistant.
+Following are the latest entity states in the smart home:
 
 Name,ID,State
 "Date & Time","sensor.date_time","2024-01-14, 00:58"
@@ -57,16 +59,18 @@ Name,ID,State
 "Air Purifier","switch.aukey_air_purifier","unknown"
 "Entry Light","switch.entry_light","off"
 
-The ID of Espresso Machine is switch.aukey_espresso
+Greet the user, and then answer the user's instructions.
+
+Assistant: Hi, I am your smart home assistant. How may I help you?
+User: What are the IDs of the temperature sensors?
+Assistant: The IDs are sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature, 
 """
 
-# _model += f"The ID of the light is {entity_id()}\n"
-_model += "The IDs of all temperatures are sensor.kitchen_temperature, sensor.hallway_temperature, sensor.bedroom_temperature, \n"
-# _model += f"Repeat switch.tv 5 times: switch.tv, {entity_id_list()}\n"
-_model += f"The IDs of all switches are {entity_id_list()}\n"
-_model += f"The ID of the light is {entity_id_list()}\n"
+_model += f"User: What are the IDs of the TV?\nAssistant: The IDs are {entity_id_list()}\n"
+_model += f"User: What are the IDs of all switches?\nAssistant: The IDs are {entity_id_list()}\n"
 
-_logger.info(_model)
-_logger.info(f"""
+_logger.info(f"""Model state:
+{_model}
+
 entity_id_list: {_model["entity_id_list"]}
 """)

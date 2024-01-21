@@ -65,9 +65,12 @@ def entity_id_list_stateless(lm: models.Model) -> models.Model:
 def entity_id_list(lm: models.Model) -> models.Model:
     MAX_NUM_ENTITIES = 10
     lm = lm.remove("entity_id_list")
+    # Preserve the starting output of the Model, in case we need to revise the
+    # model output.
+    lm_start = lm
     num_generated = 0
     while True:
-        lm += select([capture(entity_id(), "__LIST_APPEND:entity_id_list") + select([", ", ""]), ""])
+        lm += select([capture(entity_id(), "__LIST_APPEND:entity_id_list") + ", ", ""])
         entities = lm.get("entity_id_list", default=[])
         new_num_generated = len(entities)
         if new_num_generated == num_generated:
@@ -90,9 +93,14 @@ def entity_id_list(lm: models.Model) -> models.Model:
     entities = lm["entity_id_list"]
     entities_no_duplicates = list(set(entities))
     num_duplicates = len(entities) - len(entities_no_duplicates)
-    if num_duplicates > 0:
+    if num_duplicates == 0:
+        # If the entity_id_list is good, then we are done.
+        return lm
+    else:
+        # Otherwise, update the entity_id_list, and revise the model output
+        # accordingly.
         _logger.warning(f"{num_duplicates} duplicate(s) have been removed.")
         _logger.debug(f"entities: {entities}\nentities_no_duplicates: {entities_no_duplicates}")
-        lm = lm.set("entity_id_list", entities_no_duplicates)
-
-    return lm
+        lm = lm_start.set("entity_id_list", entities_no_duplicates)
+        lm += ", ".join(entities_no_duplicates)
+        return lm
