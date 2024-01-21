@@ -12,6 +12,7 @@ from guidance import (
     assistant,
     user,
 )
+from guidance.models import Model
 
 import guidance
 import utils
@@ -46,17 +47,23 @@ ENTITIES = [
     "switch.entry_light",
 ]
 
+SERVICES = [
+    "homeassistant.turn_on",
+    "homeassistant.turn_off",
+    "homeassistant.toggle",
+]
+
 _logger = utils.get_logger()
 
 
 @guidance(stateless=True)
-def entity_id(lm: models.Model) -> models.Model:
+def entity_id(lm: Model) -> Model:
     lm += select(ENTITIES)
     return lm
 
 
 @guidance(stateless=True)
-def entity_id_list_stateless(lm: models.Model) -> models.Model:
+def entity_id_list_stateless(lm: Model) -> Model:
     lm += token_limit(zero_or_more(capture(entity_id(), "__LIST_APPEND:entity_id_list") + ", "), 100)
     return lm
 
@@ -74,7 +81,7 @@ def zero_or_more(lm, value, sep: str):
 
 
 @guidance
-def entity_id_list(lm: models.Model) -> models.Model:
+def entity_id_list(lm: Model) -> Model:
     MAX_NUM_ENTITIES = 10
     lm = lm.remove("entity_id_list")
     # Preserve the starting output of the Model, in case we need to revise the
@@ -113,7 +120,35 @@ def entity_id_list(lm: models.Model) -> models.Model:
         # Otherwise, update the entity_id_list, and revise the model output
         # accordingly.
         _logger.warning(f"{num_duplicates} duplicate(s) have been removed.")
-        _logger.debug(f"entities: {entities}\nentities_no_duplicates: {entities_no_duplicates}")
+        _logger.debug(f"\nentities: {entities}\nentities_no_duplicates: {entities_no_duplicates}")
         lm = lm_start.set("entity_id_list", entities_no_duplicates)
         lm += ", ".join(entities_no_duplicates)
         return lm
+
+
+@guidance(stateless=True)
+def service(model):
+    return model + select(SERVICES)
+
+
+@guidance(stateless=True)
+def service_or_none(model):
+    return model + select(SERVICES + ["none"], name="service")
+
+
+@guidance
+def assistant_response(lm: Model, request) -> Model:
+    newline = "\n"
+    lm += f"""
+User: {request}
+Assistant:
+  Service: {service_or_none()}
+  Entities: {entity_id_list()}
+  Response: {gen(stop=newline, name="response")}
+"""
+    lm = lm.set("response", {
+        "service": lm["service"],
+        "entities": lm["entity_id_list"],
+        "response": lm["response"],
+    })
+    return lm
