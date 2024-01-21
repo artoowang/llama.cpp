@@ -4,7 +4,9 @@ from guidance import (
     # Libraries.
     capture,
     gen,
+    zero_or_more,
     # Grammars.
+    token_limit,
     select,
     # Roles.
     assistant,
@@ -50,6 +52,12 @@ _logger = utils.get_logger()
 @guidance(stateless=True)
 def entity_id(lm: models.Model) -> models.Model:
     lm += select(ENTITIES)
+    return lm
+
+
+@guidance(stateless=True)
+def entity_id_list_stateless(lm: models.Model) -> models.Model:
+    lm += token_limit(zero_or_more(capture(entity_id(), "__LIST_APPEND:entity_id_list") + ", "), 100)
     return lm
 
 
