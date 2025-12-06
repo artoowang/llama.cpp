@@ -14,13 +14,12 @@ You are provided with function signatures within <tools></tools> XML tags:
     'name': 'HassStartTimer',
     'parameters': {
         'properties': {
-            'hours': {'minimum': 0, 'type': 'integer'},
-            'minutes': {'minimum': 0, 'type': 'integer'},
+            'hours': {'type': 'integer'},
+            'minutes': {'type': 'integer'},
             'name': {'type': 'string'},
-            'seconds': {'minimum': 0, 'type': 'integer'}
+            'seconds': {'type': 'integer'}
         },
         'required': [],
-        'type': 'object',
     },
 },
 </tools>
