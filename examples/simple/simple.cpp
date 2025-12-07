@@ -176,6 +176,18 @@ int main(int argc, char ** argv) {
         print_llama_batch(batch);
     }
 
+    // The next position to decode.
+    int n_pos = 0;
+
+    // Evaluate the initial batch with the transformer model.
+    const int64_t prompt_decode_start = ggml_time_us();
+    if (llama_decode(ctx, batch)) {
+        fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
+        return 1;
+    }
+    printf("Prompt decode: %.2f s\n", (ggml_time_us() - prompt_decode_start) / 1e6f);
+    n_pos += batch.n_tokens;
+
     // main loop
 
     printf("Main loop starts\n");
@@ -185,16 +197,8 @@ int main(int argc, char ** argv) {
     llama_token new_token_id;
 
     printf("ZZZ: n_prompt=%d n_predict=%d\n", n_prompt, n_predict);
-    for (int n_pos = 0; n_pos + batch.n_tokens < n_prompt + n_predict;) {
+    while (n_pos < n_prompt + n_predict) {
         printf("ZZZ: n_pos=%d n_decode=%d batch.n_tokens=%d\n", n_pos, n_decode, batch.n_tokens);
-
-        // evaluate the current batch with the transformer model
-        if (llama_decode(ctx, batch)) {
-            fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
-            return 1;
-        }
-
-        n_pos += batch.n_tokens;
 
         // sample the next token
         {
@@ -213,7 +217,7 @@ int main(int argc, char ** argv) {
             }
             std::string s(buf, n);
             // printf("%s", s.c_str());
-            printf("ZZZ: output=%s", s.c_str());
+            printf("ZZZ: output=%s\n", s.c_str());
             fflush(stdout);
 
             // prepare the next batch with the sampled token
@@ -223,6 +227,13 @@ int main(int argc, char ** argv) {
 
             n_decode += 1;
         }
+
+        // Evaluate the next batch with the transformer model.
+        if (llama_decode(ctx, batch)) {
+            fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
+            return 1;
+        }
+        n_pos += batch.n_tokens;
     }
 
     printf("Main loop ends\n");
