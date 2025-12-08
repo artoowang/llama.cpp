@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -479,6 +480,41 @@ void print_llama_batch(const llama_batch& batch) {
          batch.logits != nullptr ? "" : ",logits=null");
 }
 
+std::optional<llama_batch> parse_prompt(
+    const llama_vocab* vocab, const std::string& prompt,
+    std::vector<llama_token>& prompt_tokens) {
+  // tokenize the prompt
+
+  // find the number of tokens in the prompt
+  const int n_prompt = -llama_tokenize(vocab, prompt.c_str(), prompt.size(),
+                                       NULL, 0, true, true);
+
+  // allocate space for the tokens and tokenize the prompt
+  prompt_tokens.resize(n_prompt);
+  if (llama_tokenize(vocab, prompt.c_str(), prompt.size(), prompt_tokens.data(),
+                     prompt_tokens.size(), true, true) < 0) {
+    fprintf(stderr, "%s: error: failed to tokenize the prompt\n", __func__);
+    return std::nullopt;
+  }
+
+  // print the prompt token-by-token
+  for (auto id : prompt_tokens) {
+    char buf[128];
+    int n = llama_token_to_piece(vocab, id, buf, sizeof(buf), 0, true);
+    if (n < 0) {
+      fprintf(stderr, "%s: error: failed to convert token to piece\n",
+              __func__);
+      return std::nullopt;
+    }
+    std::string s(buf, n);
+    printf("%s", s.c_str());
+  }
+  printf("\n");
+
+  // prepare a batch for the prompt
+  return llama_batch_get_one(prompt_tokens.data(), prompt_tokens.size());
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -563,28 +599,14 @@ int main(int argc, char** argv) {
   }
 
   const llama_vocab* vocab = llama_model_get_vocab(model);
-  // tokenize the prompt
-
-  // find the number of tokens in the prompt
-  const int n_prompt = -llama_tokenize(vocab, prompt.c_str(), prompt.size(),
-                                       NULL, 0, true, true);
-
-  // allocate space for the tokens and tokenize the prompt
-  std::vector<llama_token> prompt_tokens(n_prompt);
-  if (llama_tokenize(vocab, prompt.c_str(), prompt.size(), prompt_tokens.data(),
-                     prompt_tokens.size(), true, true) < 0) {
-    fprintf(stderr, "%s: error: failed to tokenize the prompt\n", __func__);
-    return 1;
-  }
 
   // initialize the context
-
   llama_context_params ctx_params = llama_context_default_params();
   // n_ctx is the context size
-  ctx_params.n_ctx = n_prompt + n_predict - 1;
+  ctx_params.n_ctx = 8192;
   // n_batch is the maximum number of tokens that can be processed in a single
   // call to llama_decode
-  ctx_params.n_batch = n_prompt;
+  ctx_params.n_batch = 8192;
   // enable performance counters
   ctx_params.no_perf = false;
 
@@ -604,26 +626,21 @@ int main(int argc, char** argv) {
 
   llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
 
-  // print the prompt token-by-token
-
-  for (auto id : prompt_tokens) {
-    char buf[128];
-    int n = llama_token_to_piece(vocab, id, buf, sizeof(buf), 0, true);
-    if (n < 0) {
-      fprintf(stderr, "%s: error: failed to convert token to piece\n",
-              __func__);
-      return 1;
-    }
-    std::string s(buf, n);
-    printf("%s", s.c_str());
+  // TODO: We need to have a structure that holds the tokens, so we don't rely
+  // on this vector.
+  std::vector<llama_token> prompt_tokens;
+  std::optional<llama_batch> prompt_batch_result =
+      parse_prompt(vocab, prompt, prompt_tokens);
+  if (!prompt_batch_result.has_value()) {
+    fprintf(stderr, "Failed to create batch for prompt\n");
+    return 1;
   }
-  printf("\n");
-
-  // prepare a batch for the prompt
-
-  llama_batch batch =
-      llama_batch_get_one(prompt_tokens.data(), prompt_tokens.size());
+  llama_batch batch = prompt_batch_result.value();
   print_llama_batch(batch);
+
+  const int n_total = batch.n_tokens + n_predict;
+  printf("ZZZ: n_predict=%d, prompt n_tokens=%d, n_total=%d\n", n_predict,
+         batch.n_tokens, n_total);
 
   if (llama_model_has_encoder(model)) {
     printf("Model has encoder\n");
@@ -662,8 +679,7 @@ int main(int argc, char** argv) {
   int n_decode = 0;
   llama_token new_token_id;
 
-  printf("ZZZ: n_prompt=%d n_predict=%d\n", n_prompt, n_predict);
-  while (n_pos < n_prompt + n_predict) {
+  while (n_pos < n_total) {
     printf("ZZZ: n_pos=%d n_decode=%d batch.n_tokens=%d\n", n_pos, n_decode,
            batch.n_tokens);
 
