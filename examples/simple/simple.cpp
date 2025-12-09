@@ -463,6 +463,61 @@ For each function call, return a json object with function name and arguments wi
 <|im_start|>assistant
 )";
 
+// Holds a llama_batch along with the storage for its tokens.
+class Batch {
+ public:
+  // Creates a Batch from a prompt string. Returns std::nullopt on failure.
+  static std::optional<Batch> CreateFromPrompt(const llama_vocab* vocab,
+                                               const std::string& prompt) {
+    // Tokenize the prompt.
+    // Find the number of tokens in the prompt.
+    const int n_prompt = -llama_tokenize(vocab, prompt.c_str(), prompt.size(),
+                                         nullptr, 0, true, true);
+    // allocate space for the tokens and tokenize the prompt
+    std::vector<llama_token> tokens(n_prompt);
+    if (llama_tokenize(vocab, prompt.c_str(), prompt.size(), tokens.data(),
+                       tokens.size(), true, true) < 0) {
+      fprintf(stderr, "%s: error: failed to tokenize the prompt\n", __func__);
+      return std::nullopt;
+    }
+
+    return Batch(std::move(tokens), vocab);
+  }
+
+  // Returns the llama_batch pointing to the tokens stored in this object.
+  llama_batch Get() const { return batch_; }
+
+  // Prints the tokens stored in this object.
+  void Print() const {
+    // print the prompt token-by-token
+    for (auto id : tokens_) {
+      char buf[128];
+      int n = llama_token_to_piece(vocab_, id, buf, sizeof(buf), 0, true);
+      if (n < 0) {
+        fprintf(stderr, "%s: error: failed to convert token to piece\n",
+                __func__);
+        return;
+      }
+      std::string s(buf, n);
+      printf("%s", s.c_str());
+    }
+    printf("\n");
+  }
+
+ private:
+  // Constructs a Batch from a vector of tokens and the vocabulary. The object
+  // owns the tokens, but does not own the vocabulary, and the caller needs to
+  // make sure the vocabulary remains valid.
+  Batch(std::vector<llama_token>&& tokens, const llama_vocab* vocab)
+      : vocab_(vocab),
+        tokens_(std::move(tokens)),
+        batch_(llama_batch_get_one(tokens_.data(), tokens_.size())) {}
+
+  const llama_vocab* vocab_;
+  std::vector<llama_token> tokens_;
+  llama_batch batch_;
+};
+
 void print_usage(int, char** argv) {
   printf("\nexample usage:\n");
   printf("\n    %s -m model.gguf [-n n_predict] [-ngl n_gpu_layers] [prompt]\n",
@@ -478,41 +533,6 @@ void print_llama_batch(const llama_batch& batch) {
          batch.n_seq_id != nullptr ? "" : ",n_seq_id=null",
          batch.seq_id != nullptr ? "" : ",seq_id=null",
          batch.logits != nullptr ? "" : ",logits=null");
-}
-
-std::optional<llama_batch> parse_prompt(
-    const llama_vocab* vocab, const std::string& prompt,
-    std::vector<llama_token>& prompt_tokens) {
-  // tokenize the prompt
-
-  // find the number of tokens in the prompt
-  const int n_prompt = -llama_tokenize(vocab, prompt.c_str(), prompt.size(),
-                                       NULL, 0, true, true);
-
-  // allocate space for the tokens and tokenize the prompt
-  prompt_tokens.resize(n_prompt);
-  if (llama_tokenize(vocab, prompt.c_str(), prompt.size(), prompt_tokens.data(),
-                     prompt_tokens.size(), true, true) < 0) {
-    fprintf(stderr, "%s: error: failed to tokenize the prompt\n", __func__);
-    return std::nullopt;
-  }
-
-  // print the prompt token-by-token
-  for (auto id : prompt_tokens) {
-    char buf[128];
-    int n = llama_token_to_piece(vocab, id, buf, sizeof(buf), 0, true);
-    if (n < 0) {
-      fprintf(stderr, "%s: error: failed to convert token to piece\n",
-              __func__);
-      return std::nullopt;
-    }
-    std::string s(buf, n);
-    printf("%s", s.c_str());
-  }
-  printf("\n");
-
-  // prepare a batch for the prompt
-  return llama_batch_get_one(prompt_tokens.data(), prompt_tokens.size());
 }
 
 }  // namespace
@@ -626,16 +646,13 @@ int main(int argc, char** argv) {
 
   llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
 
-  // TODO: We need to have a structure that holds the tokens, so we don't rely
-  // on this vector.
-  std::vector<llama_token> prompt_tokens;
-  std::optional<llama_batch> prompt_batch_result =
-      parse_prompt(vocab, prompt, prompt_tokens);
-  if (!prompt_batch_result.has_value()) {
+  std::optional<Batch> prompt_batch = Batch::CreateFromPrompt(vocab, prompt);
+  if (!prompt_batch.has_value()) {
     fprintf(stderr, "Failed to create batch for prompt\n");
     return 1;
   }
-  llama_batch batch = prompt_batch_result.value();
+  prompt_batch->Print();
+  llama_batch batch = prompt_batch->Get();
   print_llama_batch(batch);
 
   const int n_total = batch.n_tokens + n_predict;
