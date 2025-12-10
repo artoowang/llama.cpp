@@ -488,7 +488,7 @@ class Batch {
   llama_batch Get() const { return batch_; }
 
   // Prints the tokens stored in this object.
-  void Print() const {
+  void PrintTokens() const {
     // print the prompt token-by-token
     for (auto id : tokens_) {
       char buf[128];
@@ -502,6 +502,20 @@ class Batch {
       printf("%s", s.c_str());
     }
     printf("\n");
+  }
+
+  // Prints the Batch information.
+  void Print() const { PrintLlamaBatch(batch_); }
+
+  // Prints the given `llama_batch` information.
+  static void PrintLlamaBatch(const llama_batch& batch) {
+    printf("llama_batch{n_tokens=%d%s%s%s%s%s%s}\n", batch.n_tokens,
+           batch.token != nullptr ? "" : ",tokens=null",
+           batch.embd != nullptr ? "" : ",embd=null",
+           batch.pos != nullptr ? "" : ",pos=null",
+           batch.n_seq_id != nullptr ? "" : ",n_seq_id=null",
+           batch.seq_id != nullptr ? "" : ",seq_id=null",
+           batch.logits != nullptr ? "" : ",logits=null");
   }
 
  private:
@@ -523,16 +537,6 @@ void print_usage(int, char** argv) {
   printf("\n    %s -m model.gguf [-n n_predict] [-ngl n_gpu_layers] [prompt]\n",
          argv[0]);
   printf("\n");
-}
-
-void print_llama_batch(const llama_batch& batch) {
-  printf("llama_batch{n_tokens=%d%s%s%s%s%s%s}\n", batch.n_tokens,
-         batch.token != nullptr ? "" : ",tokens=null",
-         batch.embd != nullptr ? "" : ",embd=null",
-         batch.pos != nullptr ? "" : ",pos=null",
-         batch.n_seq_id != nullptr ? "" : ",n_seq_id=null",
-         batch.seq_id != nullptr ? "" : ",seq_id=null",
-         batch.logits != nullptr ? "" : ",logits=null");
 }
 
 }  // namespace
@@ -639,7 +643,6 @@ int main(int argc, char** argv) {
   }
 
   // initialize the sampler
-
   auto sparams = llama_sampler_chain_default_params();
   sparams.no_perf = false;
   llama_sampler* smpl = llama_sampler_chain_init(sparams);
@@ -651,17 +654,19 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Failed to create batch for prompt\n");
     return 1;
   }
+  prompt_batch->PrintTokens();
   prompt_batch->Print();
-  llama_batch batch = prompt_batch->Get();
-  print_llama_batch(batch);
 
-  const int n_total = batch.n_tokens + n_predict;
+  const int n_total = prompt_batch->Get().n_tokens + n_predict;
   printf("ZZZ: n_predict=%d, prompt n_tokens=%d, n_total=%d\n", n_predict,
-         batch.n_tokens, n_total);
+         prompt_batch->Get().n_tokens, n_total);
+
+  // The next position to decode.
+  int n_pos = 0;
 
   if (llama_model_has_encoder(model)) {
     printf("Model has encoder\n");
-    if (llama_encode(ctx, batch)) {
+    if (llama_encode(ctx, prompt_batch->Get())) {
       fprintf(stderr, "%s : failed to eval\n", __func__);
       return 1;
     }
@@ -671,58 +676,57 @@ int main(int argc, char** argv) {
       decoder_start_token_id = llama_vocab_bos(vocab);
     }
 
-    batch = llama_batch_get_one(&decoder_start_token_id, 1);
-    print_llama_batch(batch);
-  }
+    llama_batch batch = llama_batch_get_one(&decoder_start_token_id, 1);
+    if (llama_decode(ctx, batch)) {
+      fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
+      return 1;
+    }
+    n_pos += batch.n_tokens;
 
-  // The next position to decode.
-  int n_pos = 0;
-
-  // Evaluate the initial batch with the transformer model.
-  const int64_t prompt_decode_start = ggml_time_us();
-  if (llama_decode(ctx, batch)) {
-    fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
-    return 1;
+  } else {
+    // Evaluate the initial batch with the transformer model.
+    const int64_t prompt_decode_start = ggml_time_us();
+    if (llama_decode(ctx, prompt_batch->Get())) {
+      fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
+      return 1;
+    }
+    printf("Prompt decode: %.2f s\n",
+           (ggml_time_us() - prompt_decode_start) / 1e6f);
+    n_pos += prompt_batch->Get().n_tokens;
   }
-  printf("Prompt decode: %.2f s\n",
-         (ggml_time_us() - prompt_decode_start) / 1e6f);
-  n_pos += batch.n_tokens;
 
   // main loop
-
   printf("Main loop starts\n");
 
-  const auto t_main_start = ggml_time_us();
+  const int64_t t_main_start = ggml_time_us();
   int n_decode = 0;
   llama_token new_token_id;
 
   while (n_pos < n_total) {
     // sample the next token
-    {
-      new_token_id = llama_sampler_sample(smpl, ctx, -1);
+    new_token_id = llama_sampler_sample(smpl, ctx, -1);
 
-      // is it an end of generation?
-      if (llama_vocab_is_eog(vocab, new_token_id)) {
-        break;
-      }
-
-      char buf[128];
-      int n =
-          llama_token_to_piece(vocab, new_token_id, buf, sizeof(buf), 0, true);
-      if (n < 0) {
-        fprintf(stderr, "%s: error: failed to convert token to piece\n",
-                __func__);
-        return 1;
-      }
-      std::string s(buf, n);
-      printf("%s", s.c_str());
-      fflush(stdout);
-
-      // prepare the next batch with the sampled token
-      batch = llama_batch_get_one(&new_token_id, 1);
-
-      n_decode += 1;
+    // is it an end of generation?
+    if (llama_vocab_is_eog(vocab, new_token_id)) {
+      break;
     }
+
+    char buf[128];
+    int n =
+        llama_token_to_piece(vocab, new_token_id, buf, sizeof(buf), 0, true);
+    if (n < 0) {
+      fprintf(stderr, "%s: error: failed to convert token to piece\n",
+              __func__);
+      return 1;
+    }
+    std::string s(buf, n);
+    printf("%s", s.c_str());
+    fflush(stdout);
+
+    // prepare the next batch with the sampled token
+    llama_batch batch = llama_batch_get_one(&new_token_id, 1);
+
+    n_decode += 1;
 
     // Evaluate the next batch with the transformer model.
     if (llama_decode(ctx, batch)) {
