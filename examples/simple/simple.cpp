@@ -697,9 +697,6 @@ int main(int argc, char** argv) {
   llama_token new_token_id;
 
   while (n_pos < n_total) {
-    printf("ZZZ: n_pos=%d n_decode=%d batch.n_tokens=%d\n", n_pos, n_decode,
-           batch.n_tokens);
-
     // sample the next token
     {
       new_token_id = llama_sampler_sample(smpl, ctx, -1);
@@ -718,14 +715,11 @@ int main(int argc, char** argv) {
         return 1;
       }
       std::string s(buf, n);
-      // printf("%s", s.c_str());
-      printf("ZZZ: output=%s\n", s.c_str());
+      printf("%s", s.c_str());
       fflush(stdout);
 
       // prepare the next batch with the sampled token
       batch = llama_batch_get_one(&new_token_id, 1);
-      // TODO: Printing this will be mixed with the generated text.
-      // print_llama_batch(batch);
 
       n_decode += 1;
     }
