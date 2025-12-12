@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -534,19 +535,26 @@ class Batch {
 };
 
 class ModelContext {
+ private:
+  // The following requires the deleter to be able to handle nullptr, which they
+  // seem to do. Note that C++ standard guarantees delete nullptr is safe.
+  using ModelPtr = std::unique_ptr<llama_model, decltype(&llama_model_free)>;
+  using ContextPtr = std::unique_ptr<llama_context, decltype(&llama_free)>;
+  using SampelrPtr =
+      std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)>;
+
  public:
   static std::optional<ModelContext> Create(int32_t n_gpu_layers,
                                             const std::string& model_path) {
     // Initialize the model.
     llama_model_params model_params = llama_model_default_params();
     model_params.n_gpu_layers = n_gpu_layers;
-    llama_model* model =
-        llama_model_load_from_file(model_path.c_str(), model_params);
-    if (model == NULL) {
+    ModelPtr model(llama_model_load_from_file(model_path.c_str(), model_params),
+                   llama_model_free);
+    if (model == nullptr) {
       fprintf(stderr, "%s: error: unable to load model\n", __func__);
       return std::nullopt;
     }
-    const llama_vocab* vocab = llama_model_get_vocab(model);
 
     // initialize the context
     llama_context_params ctx_params = llama_context_default_params();
@@ -557,15 +565,14 @@ class ModelContext {
     ctx_params.n_batch = 8192;
     // enable performance counters
     ctx_params.no_perf = false;
-    llama_context* ctx = llama_init_from_model(model, ctx_params);
-    if (ctx == NULL) {
+    ContextPtr ctx(llama_init_from_model(model.get(), ctx_params), llama_free);
+    if (ctx == nullptr) {
       fprintf(stderr, "%s: error: failed to create the llama_context\n",
               __func__);
-      llama_model_free(model);
       return std::nullopt;
     }
 
-    return ModelContext(model, vocab, ctx);
+    return ModelContext(std::move(model), std::move(ctx));
   }
 
   // Disable copy semantics.
@@ -573,72 +580,31 @@ class ModelContext {
   ModelContext& operator=(const ModelContext& other) = delete;
 
   // Move semantics.
-  ModelContext(ModelContext&& other) noexcept
-      : model_(other.model_),
-        vocab_(other.vocab_),
-        ctx_(other.ctx_),
-        sampler_(other.sampler_) {
-    other.Clear();
-  }
-  ModelContext& operator=(ModelContext&& other) noexcept {
-    if (this != &other) {
-      SafeRelease();
-
-      model_ = other.model_;
-      vocab_ = other.vocab_;
-      ctx_ = other.ctx_;
-      sampler_ = other.sampler_;
-
-      other.Clear();
-    }
-    return *this;
-  }
-
-  virtual ~ModelContext() { SafeRelease(); }
+  ModelContext(ModelContext&& other) = default;
+  ModelContext& operator=(ModelContext&& other) = default;
 
   const llama_vocab* GetVocab() const { return vocab_; }
-  const llama_model* GetModel() const { return model_; }
-  llama_context* GetContext() { return ctx_; }
-  llama_sampler* GetSampler() { return sampler_; }
+  const llama_model* GetModel() const { return model_.get(); }
+  llama_context* GetContext() { return ctx_.get(); }
+  llama_sampler* GetSampler() { return sampler_.get(); }
 
  private:
-  ModelContext(llama_model* model, const llama_vocab* vocab, llama_context* ctx)
-      : model_(model), vocab_(vocab), ctx_(ctx), sampler_(nullptr) {
+  ModelContext(ModelPtr model, ContextPtr ctx)
+      : model_(std::move(model)),
+        ctx_(std::move(ctx)),
+        sampler_(nullptr, llama_sampler_free),
+        vocab_(llama_model_get_vocab(model_.get())) {
     // Initialize the sampler.
     llama_sampler_chain_params params = llama_sampler_chain_default_params();
     params.no_perf = false;
-    sampler_ = llama_sampler_chain_init(params);
-    llama_sampler_chain_add(sampler_, llama_sampler_init_greedy());
+    sampler_.reset(llama_sampler_chain_init(params));
+    llama_sampler_chain_add(sampler_.get(), llama_sampler_init_greedy());
   }
 
-  // Releases owned resources if not null.
-  void SafeRelease() {
-    if (sampler_ != nullptr) {
-      llama_sampler_free(sampler_);
-      sampler_ = nullptr;
-    }
-    if (ctx_ != nullptr) {
-      llama_free(ctx_);
-      ctx_ = nullptr;
-    }
-    if (model_ != nullptr) {
-      llama_model_free(model_);
-      model_ = nullptr;
-    }
-  }
-
-  // Clears all resource pointers without releasing them.
-  void Clear() {
-    model_ = nullptr;
-    vocab_ = nullptr;
-    ctx_ = nullptr;
-    sampler_ = nullptr;
-  }
-
-  llama_model* model_;
+  ModelPtr model_;
+  std::unique_ptr<llama_context, decltype(&llama_free)> ctx_;
+  std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> sampler_;
   const llama_vocab* vocab_;
-  llama_context* ctx_;
-  llama_sampler* sampler_;
 };
 
 void PrintUsage(int, char** argv) {
