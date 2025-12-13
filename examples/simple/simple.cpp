@@ -486,6 +486,14 @@ class Batch {
     return Batch(std::move(tokens), vocab);
   }
 
+  // Disable copy semantics.
+  Batch(const Batch& other) = delete;
+  Batch& operator=(const Batch& other) = delete;
+
+  // Move semantics.
+  Batch(Batch&& other) = default;
+  Batch& operator=(Batch&& other) = default;
+
   // Returns the llama_batch pointing to the tokens stored in this object.
   llama_batch Get() const { return batch_; }
 
@@ -583,6 +591,9 @@ class ModelContext {
   ModelContext(ModelContext&& other) = default;
   ModelContext& operator=(ModelContext&& other) = default;
 
+  // Access the raw objects. These are only here in order to call llama_*()
+  // methods. Ideally, all functionalities should be implemented within this
+  // class instead.
   const llama_vocab* GetVocab() const { return vocab_; }
   const llama_model* GetModel() const { return model_.get(); }
   llama_context* GetContext() { return ctx_.get(); }
@@ -691,25 +702,26 @@ int main(int argc, char** argv) {
   }
   ModelContext model_ctx(std::move(model_ctx_opt.value()));
 
-  std::optional<Batch> prompt_batch =
+  std::optional<Batch> prompt_batch_opt =
       Batch::CreateFromPrompt(model_ctx.GetVocab(), prompt);
-  if (!prompt_batch.has_value()) {
+  if (!prompt_batch_opt.has_value()) {
     fprintf(stderr, "Failed to create batch for prompt\n");
     return 1;
   }
-  prompt_batch->PrintTokens();
-  prompt_batch->Print();
+  Batch prompt_batch(std::move(prompt_batch_opt.value()));
+  prompt_batch.PrintTokens();
+  prompt_batch.Print();
 
-  const int n_total = prompt_batch->Get().n_tokens + n_predict;
+  const int n_total = prompt_batch.Get().n_tokens + n_predict;
   printf("ZZZ: n_predict=%d, prompt n_tokens=%d, n_total=%d\n", n_predict,
-         prompt_batch->Get().n_tokens, n_total);
+         prompt_batch.Get().n_tokens, n_total);
 
   // The next position to decode.
   int n_pos = 0;
 
   if (llama_model_has_encoder(model_ctx.GetModel())) {
     printf("Model has encoder\n");
-    if (llama_encode(model_ctx.GetContext(), prompt_batch->Get())) {
+    if (llama_encode(model_ctx.GetContext(), prompt_batch.Get())) {
       fprintf(stderr, "%s : failed to eval\n", __func__);
       return 1;
     }
@@ -730,13 +742,13 @@ int main(int argc, char** argv) {
   } else {
     // Evaluate the initial batch with the transformer model.
     const int64_t prompt_decode_start = ggml_time_us();
-    if (llama_decode(model_ctx.GetContext(), prompt_batch->Get())) {
+    if (llama_decode(model_ctx.GetContext(), prompt_batch.Get())) {
       fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
       return 1;
     }
     printf("Prompt decode: %.2f s\n",
            (ggml_time_us() - prompt_decode_start) / 1e6f);
-    n_pos += prompt_batch->Get().n_tokens;
+    n_pos += prompt_batch.Get().n_tokens;
   }
 
   // main loop
