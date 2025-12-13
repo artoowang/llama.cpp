@@ -7,6 +7,9 @@
 #include <string>
 #include <vector>
 
+#include "absl/flags/flag.h"
+#include "absl/flags/parse.h"
+#include "absl/flags/usage.h"
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
@@ -704,14 +707,14 @@ class ModelContext {
   const llama_vocab* vocab_;
 };
 
-void PrintUsage(int, char** argv) {
-  LOG(INFO) << "Example usage: " << argv[0]
-            << " -m model.gguf [-n n_predict] [-ngl n_gpu_layers] [prompt]";
-}
-
 }  // namespace
 
+ABSL_FLAG(std::string, model, "", "Path to GGUF model.");
+ABSL_FLAG(int, ngl, 99, "Number of layers to offload to GPU.");
+
 int main(int argc, char** argv) {
+  absl::SetProgramUsageMessage(" --model model.gguf [--ngl n_gpu_layers]");
+  absl::ParseCommandLine(argc, argv);
   absl::InitializeLog();
 
   // By default, absl writes to stderr, and it sets the threshold to be ERROR.
@@ -719,67 +722,17 @@ int main(int argc, char** argv) {
   absl::SetStderrThreshold(absl::LogSeverity::kInfo);
 
   // path to the model gguf file
-  std::string model_path;
+  const std::string model_path = absl::GetFlag(FLAGS_model);
+  if (model_path.empty()) {
+    LOG(ERROR) << "Model path is required.";
+    return 1;
+  }
+
+  // number of layers to offload to the GPU
+  const int ngl = absl::GetFlag(FLAGS_ngl);
+
   // prompt to generate text from
   std::string prompt = kPrompt;
-  // number of layers to offload to the GPU
-  int ngl = 99;
-  // number of tokens to predict
-  int n_predict = 32;
-
-  // parse command line arguments
-
-  {
-    int i = 1;
-    for (; i < argc; i++) {
-      if (strcmp(argv[i], "-m") == 0) {
-        if (i + 1 < argc) {
-          model_path = argv[++i];
-        } else {
-          PrintUsage(argc, argv);
-          return 1;
-        }
-      } else if (strcmp(argv[i], "-n") == 0) {
-        if (i + 1 < argc) {
-          try {
-            n_predict = std::stoi(argv[++i]);
-          } catch (...) {
-            PrintUsage(argc, argv);
-            return 1;
-          }
-        } else {
-          PrintUsage(argc, argv);
-          return 1;
-        }
-      } else if (strcmp(argv[i], "-ngl") == 0) {
-        if (i + 1 < argc) {
-          try {
-            ngl = std::stoi(argv[++i]);
-          } catch (...) {
-            PrintUsage(argc, argv);
-            return 1;
-          }
-        } else {
-          PrintUsage(argc, argv);
-          return 1;
-        }
-      } else {
-        // prompt starts here
-        break;
-      }
-    }
-    if (model_path.empty()) {
-      PrintUsage(argc, argv);
-      return 1;
-    }
-    if (i < argc) {
-      prompt = argv[i++];
-      for (; i < argc; i++) {
-        prompt += " ";
-        prompt += argv[i];
-      }
-    }
-  }
 
   // load dynamic backends
   ggml_backend_load_all();
