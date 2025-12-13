@@ -625,6 +625,56 @@ class ModelContext {
     return true;
   }
 
+  // Samples the model until receiving end-of-generation token. Returns the
+  // sampled result in string.
+  std::string SampleUntilEndOfGeneration() {
+    const int64_t t_main_start = ggml_time_us();
+    int n_decode = 0;
+    std::string result;
+
+    while (true) {
+      // sample the next token
+      llama_token new_token_id =
+          llama_sampler_sample(sampler_.get(), ctx_.get(), -1);
+
+      // is it an end of generation?
+      if (llama_vocab_is_eog(vocab_, new_token_id)) {
+        break;
+      }
+
+      char buf[128];
+      int n =
+          llama_token_to_piece(vocab_, new_token_id, buf, sizeof(buf), 0, true);
+      if (n < 0) {
+        fprintf(stderr, "%s: error: failed to convert token to piece\n",
+                __func__);
+        break;
+      }
+      std::string s(buf, n);
+      result.append(s);
+      printf("%s", s.c_str());
+      fflush(stdout);
+
+      // prepare the next batch with the sampled token
+      llama_batch batch = llama_batch_get_one(&new_token_id, 1);
+      n_decode += 1;
+
+      // Evaluate the next batch with the transformer model.
+      if (llama_decode(ctx_.get(), batch)) {
+        fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
+        break;
+      }
+    }
+
+    printf("Main loop ends\n");
+    const auto t_main_end = ggml_time_us();
+    fprintf(stderr, "%s: decoded %d tokens in %.2f s, speed: %.2f t/s\n",
+            __func__, n_decode, (t_main_end - t_main_start) / 1000000.0f,
+            n_decode / ((t_main_end - t_main_start) / 1000000.0f));
+
+    return result;
+  }
+
   // Access the raw objects. These are only here in order to call llama_*()
   // methods. Ideally, all functionalities should be implemented within this
   // class instead.
@@ -737,55 +787,9 @@ int main(int argc, char** argv) {
   ModelContext model_ctx(std::move(model_ctx_opt.value()));
 
   model_ctx.ProcessPrompt(prompt);
+  const std::string result = model_ctx.SampleUntilEndOfGeneration();
 
-  // main loop
-  printf("Main loop starts\n");
-
-  const int64_t t_main_start = ggml_time_us();
-  int n_decode = 0;
-  llama_token new_token_id;
-
-  while (true) {
-    // sample the next token
-    new_token_id = llama_sampler_sample(model_ctx.GetSampler(),
-                                        model_ctx.GetContext(), -1);
-
-    // is it an end of generation?
-    if (llama_vocab_is_eog(model_ctx.GetVocab(), new_token_id)) {
-      break;
-    }
-
-    char buf[128];
-    int n = llama_token_to_piece(model_ctx.GetVocab(), new_token_id, buf,
-                                 sizeof(buf), 0, true);
-    if (n < 0) {
-      fprintf(stderr, "%s: error: failed to convert token to piece\n",
-              __func__);
-      return 1;
-    }
-    std::string s(buf, n);
-    printf("%s", s.c_str());
-    fflush(stdout);
-
-    // prepare the next batch with the sampled token
-    llama_batch batch = llama_batch_get_one(&new_token_id, 1);
-
-    n_decode += 1;
-
-    // Evaluate the next batch with the transformer model.
-    if (llama_decode(model_ctx.GetContext(), batch)) {
-      fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
-      return 1;
-    }
-  }
-
-  printf("Main loop ends\n");
-
-  const auto t_main_end = ggml_time_us();
-
-  fprintf(stderr, "%s: decoded %d tokens in %.2f s, speed: %.2f t/s\n",
-          __func__, n_decode, (t_main_end - t_main_start) / 1000000.0f,
-          n_decode / ((t_main_end - t_main_start) / 1000000.0f));
+  printf("Result:\n%s", result.c_str());
 
   fprintf(stderr, "\n");
   llama_perf_sampler_print(model_ctx.GetSampler());
