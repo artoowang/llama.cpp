@@ -13,6 +13,8 @@
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
+#include "absl/log/log_sink_registry.h"
+#include "color_log_sink.h"
 #include "llama.h"
 
 namespace {
@@ -670,9 +672,11 @@ class ModelContext {
         break;
       }
     }
+    // Make sure we start with a new line after the tokens.
+    printf("\n");
 
     const auto t_main_end = ggml_time_us();
-    LOG(INFO) << "decoded " << n_decode << "tokens in " << std::setprecision(2)
+    LOG(INFO) << "Decoded " << n_decode << " tokens in " << std::setprecision(2)
               << (t_main_end - t_main_start) / 1000000.0f << " s, speed: "
               << n_decode / ((t_main_end - t_main_start) / 1000000.0f)
               << " t/s";
@@ -717,9 +721,10 @@ int main(int argc, char** argv) {
   absl::ParseCommandLine(argc, argv);
   absl::InitializeLog();
 
-  // By default, absl writes to stderr, and it sets the threshold to be ERROR.
-  // Change this to INFO instead.
-  absl::SetStderrThreshold(absl::LogSeverity::kInfo);
+  // Disable the default LogSink to stderr, and use our own color log sink.
+  absl::SetStderrThreshold(static_cast<absl::LogSeverity>(100));
+  ColorLogSink color_log_sink;
+  absl::AddLogSink(&color_log_sink);
 
   // path to the model gguf file
   const std::string model_path = absl::GetFlag(FLAGS_model);
