@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <iomanip>
 #include <memory>
 #include <optional>
 #include <string>
@@ -482,7 +483,7 @@ class Batch {
     std::vector<llama_token> tokens(n_prompt);
     if (llama_tokenize(vocab, prompt.c_str(), prompt.size(), tokens.data(),
                        tokens.size(), true, true) < 0) {
-      fprintf(stderr, "%s: error: failed to tokenize the prompt\n", __func__);
+      LOG(ERROR) << "failed to tokenize the prompt";
       return std::nullopt;
     }
 
@@ -503,18 +504,17 @@ class Batch {
   // Prints the tokens stored in this object.
   void PrintTokens() const {
     // print the prompt token-by-token
+    std::string str;
     for (auto id : tokens_) {
       char buf[128];
       int n = llama_token_to_piece(vocab_, id, buf, sizeof(buf), 0, true);
       if (n < 0) {
-        fprintf(stderr, "%s: error: failed to convert token to piece\n",
-                __func__);
+        LOG(ERROR) << "error: failed to convert token to piece";
         return;
       }
-      std::string s(buf, n);
-      printf("%s", s.c_str());
+      str.append(std::string(buf, n));
     }
-    printf("\n");
+    LOG(INFO) << "Batch tokens:\n" << str;
   }
 
   // Prints the Batch information.
@@ -522,13 +522,13 @@ class Batch {
 
   // Prints the given `llama_batch` information.
   static void PrintLlamaBatch(const llama_batch& batch) {
-    printf("llama_batch{n_tokens=%d%s%s%s%s%s%s}\n", batch.n_tokens,
-           batch.token != nullptr ? "" : ",tokens=null",
-           batch.embd != nullptr ? "" : ",embd=null",
-           batch.pos != nullptr ? "" : ",pos=null",
-           batch.n_seq_id != nullptr ? "" : ",n_seq_id=null",
-           batch.seq_id != nullptr ? "" : ",seq_id=null",
-           batch.logits != nullptr ? "" : ",logits=null");
+    LOG(INFO) << "llama_batch{n_tokens=" << batch.n_tokens
+              << (batch.token != nullptr ? "" : ",tokens=null")
+              << (batch.embd != nullptr ? "" : ",embd=null")
+              << (batch.pos != nullptr ? "" : ",pos=null")
+              << (batch.n_seq_id != nullptr ? "" : ",n_seq_id=null")
+              << (batch.seq_id != nullptr ? "" : ",seq_id=null")
+              << (batch.logits != nullptr ? "" : ",logits=null") << "}";
   }
 
  private:
@@ -563,13 +563,13 @@ class ModelContext {
     ModelPtr model(llama_model_load_from_file(model_path.c_str(), model_params),
                    llama_model_free);
     if (model == nullptr) {
-      fprintf(stderr, "%s: error: unable to load model\n", __func__);
+      LOG(ERROR) << "Unable to load model.";
       return std::nullopt;
     }
 
     // TODO: We currently do not support encoder.
     if (llama_model_has_encoder(model.get())) {
-      fprintf(stderr, "Encoder is currently not supported.");
+      LOG(ERROR) << "Encoder is currently not supported.";
       return std::nullopt;
     }
 
@@ -584,8 +584,7 @@ class ModelContext {
     ctx_params.no_perf = false;
     ContextPtr ctx(llama_init_from_model(model.get(), ctx_params), llama_free);
     if (ctx == nullptr) {
-      fprintf(stderr, "%s: error: failed to create the llama_context\n",
-              __func__);
+      LOG(ERROR) << "Failed to create the llama_context.";
       return std::nullopt;
     }
 
@@ -605,7 +604,7 @@ class ModelContext {
     std::optional<Batch> prompt_batch_opt =
         Batch::CreateFromPrompt(vocab_, prompt);
     if (!prompt_batch_opt.has_value()) {
-      fprintf(stderr, "Failed to create batch for prompt\n");
+      LOG(ERROR) << "Failed to create batch for prompt.";
       return false;
     }
     Batch prompt_batch(std::move(prompt_batch_opt.value()));
@@ -617,13 +616,13 @@ class ModelContext {
     // Evaluate the initial batch with the transformer model.
     const int64_t prompt_decode_start = ggml_time_us();
     if (llama_decode(ctx_.get(), prompt_batch.Get())) {
-      fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
+      LOG(ERROR) << "Failed to eval.";
       return false;
     }
 
     // TODO: Test
-    printf("Prompt decode: %.2f s\n",
-           (ggml_time_us() - prompt_decode_start) / 1e6f);
+    LOG(INFO) << "Prompt decode: " << std::setprecision(2)
+              << (ggml_time_us() - prompt_decode_start) / 1e6f << " s";
 
     return true;
   }
@@ -635,6 +634,7 @@ class ModelContext {
     int n_decode = 0;
     std::string result;
 
+    LOG(INFO) << "Generating tokens:";
     while (true) {
       // sample the next token
       llama_token new_token_id =
@@ -649,8 +649,7 @@ class ModelContext {
       int n =
           llama_token_to_piece(vocab_, new_token_id, buf, sizeof(buf), 0, true);
       if (n < 0) {
-        fprintf(stderr, "%s: error: failed to convert token to piece\n",
-                __func__);
+        LOG(ERROR) << "Failed to convert token to piece.";
         break;
       }
       std::string s(buf, n);
@@ -664,16 +663,16 @@ class ModelContext {
 
       // Evaluate the next batch with the transformer model.
       if (llama_decode(ctx_.get(), batch)) {
-        fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
+        LOG(ERROR) << "Failed to eval.";
         break;
       }
     }
 
-    printf("Main loop ends\n");
     const auto t_main_end = ggml_time_us();
-    fprintf(stderr, "%s: decoded %d tokens in %.2f s, speed: %.2f t/s\n",
-            __func__, n_decode, (t_main_end - t_main_start) / 1000000.0f,
-            n_decode / ((t_main_end - t_main_start) / 1000000.0f));
+    LOG(INFO) << "decoded " << n_decode << "tokens in " << std::setprecision(2)
+              << (t_main_end - t_main_start) / 1000000.0f << " s, speed: "
+              << n_decode / ((t_main_end - t_main_start) / 1000000.0f)
+              << " t/s";
 
     return result;
   }
@@ -706,10 +705,8 @@ class ModelContext {
 };
 
 void PrintUsage(int, char** argv) {
-  printf("\nexample usage:\n");
-  printf("\n    %s -m model.gguf [-n n_predict] [-ngl n_gpu_layers] [prompt]\n",
-         argv[0]);
-  printf("\n");
+  LOG(INFO) << "Example usage: " << argv[0]
+            << " -m model.gguf [-n n_predict] [-ngl n_gpu_layers] [prompt]";
 }
 
 }  // namespace
@@ -790,7 +787,7 @@ int main(int argc, char** argv) {
   std::optional<ModelContext> model_ctx_opt =
       ModelContext::Create(ngl, model_path);
   if (!model_ctx_opt.has_value()) {
-    fprintf(stderr, "Failed to create model and context\n");
+    LOG(ERROR) << "Failed to create model and context.";
     return 1;
   }
   ModelContext model_ctx(std::move(model_ctx_opt.value()));
@@ -800,10 +797,10 @@ int main(int argc, char** argv) {
 
   LOG(INFO) << "Result:\n" << result;
 
-  fprintf(stderr, "\n");
+  LOG(INFO) << "llama_perf:";
   llama_perf_sampler_print(model_ctx.GetSampler());
   llama_perf_context_print(model_ctx.GetContext());
-  fprintf(stderr, "\n");
+  LOG(INFO) << "Done";
 
   return 0;
 }
