@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.14) # for add_link_options and implicit target directories.
 project("llama.cpp" C CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(CheckIncludeFileCXX)
 
 #set(CMAKE_WARN_DEPRECATED YES)
@@ -185,6 +187,14 @@ endif()
 #
 # 3rd-party
 #
+
+include(FetchContent)
+FetchContent_Declare(
+  absl
+  GIT_REPOSITORY https://github.com/abseil/abseil-cpp.git
+  GIT_TAG 20250814.1
+)
+FetchContent_MakeAvailable(absl)
 
 if (LLAMA_USE_SYSTEM_GGML)
     message(STATUS "Using system-provided libggml, skipping ggml build")

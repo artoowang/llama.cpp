@@ -6,6 +6,9 @@
 #include <string>
 #include <vector>
 
+#include "absl/log/globals.h"
+#include "absl/log/initialize.h"
+#include "absl/log/log.h"
 #include "llama.h"
 
 namespace {
@@ -712,6 +715,12 @@ void PrintUsage(int, char** argv) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  absl::InitializeLog();
+
+  // By default, absl writes to stderr, and it sets the threshold to be ERROR.
+  // Change this to INFO instead.
+  absl::SetStderrThreshold(absl::LogSeverity::kInfo);
+
   // path to the model gguf file
   std::string model_path;
   // prompt to generate text from
@@ -789,7 +798,7 @@ int main(int argc, char** argv) {
   model_ctx.ProcessPrompt(prompt);
   const std::string result = model_ctx.SampleUntilEndOfGeneration();
 
-  printf("Result:\n%s", result.c_str());
+  LOG(INFO) << "Result:\n" << result;
 
   fprintf(stderr, "\n");
   llama_perf_sampler_print(model_ctx.GetSampler());
