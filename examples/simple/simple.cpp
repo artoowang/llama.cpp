@@ -564,6 +564,12 @@ class ModelContext {
       return std::nullopt;
     }
 
+    // TODO: We currently do not support encoder.
+    if (llama_model_has_encoder(model.get())) {
+      fprintf(stderr, "Encoder is currently not supported.");
+      return std::nullopt;
+    }
+
     // initialize the context
     llama_context_params ctx_params = llama_context_default_params();
     // n_ctx is the context size
@@ -590,6 +596,34 @@ class ModelContext {
   // Move semantics.
   ModelContext(ModelContext&& other) = default;
   ModelContext& operator=(ModelContext&& other) = default;
+
+  // Processes the given `prompt` into the model.
+  bool ProcessPrompt(const std::string& prompt) {
+    std::optional<Batch> prompt_batch_opt =
+        Batch::CreateFromPrompt(vocab_, prompt);
+    if (!prompt_batch_opt.has_value()) {
+      fprintf(stderr, "Failed to create batch for prompt\n");
+      return false;
+    }
+    Batch prompt_batch(std::move(prompt_batch_opt.value()));
+
+    // TODO: Test
+    prompt_batch.PrintTokens();
+    prompt_batch.Print();
+
+    // Evaluate the initial batch with the transformer model.
+    const int64_t prompt_decode_start = ggml_time_us();
+    if (llama_decode(ctx_.get(), prompt_batch.Get())) {
+      fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
+      return false;
+    }
+
+    // TODO: Test
+    printf("Prompt decode: %.2f s\n",
+           (ggml_time_us() - prompt_decode_start) / 1e6f);
+
+    return true;
+  }
 
   // Access the raw objects. These are only here in order to call llama_*()
   // methods. Ideally, all functionalities should be implemented within this
@@ -702,54 +736,7 @@ int main(int argc, char** argv) {
   }
   ModelContext model_ctx(std::move(model_ctx_opt.value()));
 
-  std::optional<Batch> prompt_batch_opt =
-      Batch::CreateFromPrompt(model_ctx.GetVocab(), prompt);
-  if (!prompt_batch_opt.has_value()) {
-    fprintf(stderr, "Failed to create batch for prompt\n");
-    return 1;
-  }
-  Batch prompt_batch(std::move(prompt_batch_opt.value()));
-  prompt_batch.PrintTokens();
-  prompt_batch.Print();
-
-  const int n_total = prompt_batch.Get().n_tokens + n_predict;
-  printf("ZZZ: n_predict=%d, prompt n_tokens=%d, n_total=%d\n", n_predict,
-         prompt_batch.Get().n_tokens, n_total);
-
-  // The next position to decode.
-  int n_pos = 0;
-
-  if (llama_model_has_encoder(model_ctx.GetModel())) {
-    printf("Model has encoder\n");
-    if (llama_encode(model_ctx.GetContext(), prompt_batch.Get())) {
-      fprintf(stderr, "%s : failed to eval\n", __func__);
-      return 1;
-    }
-
-    llama_token decoder_start_token_id =
-        llama_model_decoder_start_token(model_ctx.GetModel());
-    if (decoder_start_token_id == LLAMA_TOKEN_NULL) {
-      decoder_start_token_id = llama_vocab_bos(model_ctx.GetVocab());
-    }
-
-    llama_batch batch = llama_batch_get_one(&decoder_start_token_id, 1);
-    if (llama_decode(model_ctx.GetContext(), batch)) {
-      fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
-      return 1;
-    }
-    n_pos += batch.n_tokens;
-
-  } else {
-    // Evaluate the initial batch with the transformer model.
-    const int64_t prompt_decode_start = ggml_time_us();
-    if (llama_decode(model_ctx.GetContext(), prompt_batch.Get())) {
-      fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
-      return 1;
-    }
-    printf("Prompt decode: %.2f s\n",
-           (ggml_time_us() - prompt_decode_start) / 1e6f);
-    n_pos += prompt_batch.Get().n_tokens;
-  }
+  model_ctx.ProcessPrompt(prompt);
 
   // main loop
   printf("Main loop starts\n");
@@ -758,7 +745,7 @@ int main(int argc, char** argv) {
   int n_decode = 0;
   llama_token new_token_id;
 
-  while (n_pos < n_total) {
+  while (true) {
     // sample the next token
     new_token_id = llama_sampler_sample(model_ctx.GetSampler(),
                                         model_ctx.GetContext(), -1);
@@ -790,7 +777,6 @@ int main(int argc, char** argv) {
       fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
       return 1;
     }
-    n_pos += batch.n_tokens;
   }
 
   printf("Main loop ends\n");
