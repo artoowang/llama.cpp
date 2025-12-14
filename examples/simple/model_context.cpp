@@ -69,6 +69,30 @@ bool ModelContext::ProcessPrompt(absl::string_view prompt) {
   return true;
 }
 
+bool ModelContext::AddSystemMessage(absl::string_view system_message) {
+  const int64_t start_us = ggml_time_us();
+  std::optional<Batch> batch = Batch::CreateFromPrompt(
+      vocab_, {"<|im_start|>user\n", system_message, "\n<|im_end|>\n"});
+
+  if (!batch.has_value()) {
+    LOG(ERROR) << "Failed to create batch for user message: " << system_message;
+    return false;
+  }
+  if (llama_decode(ctx_.get(), batch->Get())) {
+    LOG(ERROR) << "Failed to decode.";
+    return false;
+  }
+
+  // TODO: Test
+  const int64_t end_us = ggml_time_us();
+  LOG(INFO) << "User message processing: " << std::setprecision(2)
+            << (end_us - start_us) / 1e6f << " s";
+  batch->PrintTokens();
+  batch->Print();
+
+  return true;
+}
+
 bool ModelContext::AddUserMessage(absl::string_view user_message) {
   const int64_t start_us = ggml_time_us();
   std::optional<Batch> batch = Batch::CreateFromPrompt(

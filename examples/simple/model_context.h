@@ -28,6 +28,9 @@ class ModelContext {
   // Processes the given `prompt` into the model.
   bool ProcessPrompt(absl::string_view prompt);
 
+  // Adds given system message into the model.
+  bool AddSystemMessage(absl::string_view system_message);
+
   // Adds given user message into the model.
   bool AddUserMessage(absl::string_view user_message);
 
