@@ -156,6 +156,46 @@ std::string ModelContext::SampleUntilEndOfGeneration() {
   return result;
 }
 
+bool ModelContext::TakeSnapshot() {
+  const int64_t start_us = ggml_time_us();
+  const size_t state_size = llama_state_get_size(ctx_.get());
+
+  snapshot_.resize(state_size);
+  const size_t result =
+      llama_state_get_data(ctx_.get(), snapshot_.data(), snapshot_.size());
+  if (result != state_size) {
+    LOG(ERROR) << "Failed to snapshot the state. Number of bytes copied: "
+               << result << ", expected: " << state_size;
+    return false;
+  }
+
+  const int64_t end_us = ggml_time_us();
+  LOG(INFO) << "Snapshot state " << state_size << " bytes in "
+            << std::setprecision(2) << (end_us - start_us) / 1e6f << " s";
+  return true;
+}
+
+bool ModelContext::RestoreSnapshot() {
+  if (snapshot_.empty()) {
+    LOG(ERROR) << "No snapshot to restore.";
+    return false;
+  }
+
+  const int64_t start_us = ggml_time_us();
+  const size_t result =
+      llama_state_set_data(ctx_.get(), snapshot_.data(), snapshot_.size());
+  if (result != snapshot_.size()) {
+    LOG(ERROR) << "Failed to restore the state. Number of bytes read: "
+               << result << ", expected: " << snapshot_.size();
+    return false;
+  }
+
+  const int64_t end_us = ggml_time_us();
+  LOG(INFO) << "Restored snapshot of " << snapshot_.size() << " bytes in "
+            << std::setprecision(2) << (end_us - start_us) / 1e6f << " s";
+  return true;
+}
+
 ModelContext::ModelContext(ModelPtr model, ContextPtr ctx)
     : model_(std::move(model)),
       ctx_(std::move(ctx)),

@@ -1,5 +1,7 @@
 #include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 #include "absl/strings/string_view.h"
 #include "llama.h"
@@ -35,6 +37,15 @@ class ModelContext {
   // sampled result in string.
   std::string SampleUntilEndOfGeneration();
 
+  // Takes a snapshot of the current model state. The snapshot is stored within
+  // this object. Only one snapshot is stored at a time: a new snapshot will
+  // overwrite the previous one. Returns false at failure.
+  bool TakeSnapshot();
+
+  // Restores the previously taken snapshot. Returns false if there is no prior
+  // snapshot, or if the restoration fails.
+  bool RestoreSnapshot();
+
   // Access the raw objects. These are only here in order to call llama_*()
   // methods. Ideally, all functionalities should be implemented within this
   // class instead.
@@ -50,4 +61,5 @@ class ModelContext {
   std::unique_ptr<llama_context, decltype(&llama_free)> ctx_;
   std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> sampler_;
   const llama_vocab* vocab_;
+  std::vector<uint8_t> snapshot_;
 };
