@@ -196,6 +196,12 @@ bool ModelContext::RestoreSnapshot() {
   return true;
 }
 
+void ModelContext::PrintPerformanceMetric() const {
+  LOG(INFO) << "llama_perf:";
+  llama_perf_sampler_print(sampler_.get());
+  llama_perf_context_print(ctx_.get());
+}
+
 ModelContext::ModelContext(ModelPtr model, ContextPtr ctx)
     : model_(std::move(model)),
       ctx_(std::move(ctx)),

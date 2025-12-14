@@ -46,13 +46,17 @@ class ModelContext {
   // snapshot, or if the restoration fails.
   bool RestoreSnapshot();
 
-  // Access the raw objects. These are only here in order to call llama_*()
-  // methods. Ideally, all functionalities should be implemented within this
-  // class instead.
-  const llama_vocab* GetVocab() const { return vocab_; }
-  const llama_model* GetModel() const { return model_.get(); }
-  llama_context* GetContext() { return ctx_.get(); }
-  llama_sampler* GetSampler() { return sampler_.get(); }
+  // Prints performance metrics.
+  void PrintPerformanceMetric() const;
+
+  // Access the raw objects.
+  // TODO: These are only here in order to call llama_*() methods. Ideally, all
+  // functionalities should be implemented within this class instead.
+  //
+  // const llama_vocab* GetVocab() const { return vocab_; }
+  // const llama_model* GetModel() const { return model_.get(); }
+  // llama_context* GetContext() { return ctx_.get(); }
+  // llama_sampler* GetSampler() { return sampler_.get(); }
 
  private:
   ModelContext(ModelPtr model, ContextPtr ctx);

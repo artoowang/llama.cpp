@@ -506,16 +506,19 @@ int main(int argc, char** argv) {
   }
   ModelContext model_ctx(std::move(model_ctx_opt.value()));
 
+  // Add static system prompt.
   model_ctx.AddSystemMessage(kStaticSystemAndToolPrompt);
+  model_ctx.TakeSnapshot();
+
+  // Restore the snapshot, add dynamic system prompt, user message, and then
+  // generate the response.
+  model_ctx.RestoreSnapshot();
   model_ctx.AddSystemMessage("The current time is 2025-12-13 18:03.");
   model_ctx.AddUserMessage(user_message);
   const std::string result = model_ctx.SampleUntilEndOfGeneration();
-
   LOG(INFO) << "Result:\n" << result;
 
-  LOG(INFO) << "llama_perf:";
-  llama_perf_sampler_print(model_ctx.GetSampler());
-  llama_perf_context_print(model_ctx.GetContext());
+  model_ctx.PrintPerformanceMetric();
   LOG(INFO) << "Done";
 
   return 0;
