@@ -14,6 +14,7 @@
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
 #include "absl/log/log_sink_registry.h"
+#include "absl/strings/string_view.h"
 #include "color_log_sink.h"
 #include "llama.h"
 
@@ -468,28 +469,40 @@ For each function call, return a json object with function name and arguments wi
 {'name': <function-name>, 'arguments': <args-json-object>}
 </tool_call>
 <|im_end|>
-<|im_start|>user
-)" + kUserMessage + R"(
-<|im_end|>
-<|im_start|>assistant
 )";
 
 // Holds a llama_batch along with the storage for its tokens.
 class Batch {
  public:
   // Creates a Batch from a prompt string. Returns std::nullopt on failure.
-  static std::optional<Batch> CreateFromPrompt(const llama_vocab* vocab,
-                                               const std::string& prompt) {
-    // Tokenize the prompt.
-    // Find the number of tokens in the prompt.
-    const int n_prompt = -llama_tokenize(vocab, prompt.c_str(), prompt.size(),
-                                         nullptr, 0, true, true);
-    // allocate space for the tokens and tokenize the prompt
-    std::vector<llama_token> tokens(n_prompt);
-    if (llama_tokenize(vocab, prompt.c_str(), prompt.size(), tokens.data(),
-                       tokens.size(), true, true) < 0) {
-      LOG(ERROR) << "failed to tokenize the prompt";
-      return std::nullopt;
+  static std::optional<Batch> CreateFromPrompt(
+      const llama_vocab* vocab, const std::vector<absl::string_view>& prompts) {
+    // Tokenize the prompts.
+    int total_tokens = 0;
+    // TODO: This might not be needed.
+    std::vector<int> prompt_tokens(prompts.size());
+    for (size_t i = 0; i < prompts.size(); ++i) {
+      // Find the number of tokens in the prompt.
+      int num_tokens = -llama_tokenize(
+          vocab, prompts[i].data(), prompts[i].size(), nullptr, 0, true, true);
+      prompt_tokens[i] = num_tokens;
+      total_tokens += num_tokens;
+    }
+
+    // Allocate space for the tokens and tokenize the prompt.
+    std::vector<llama_token> tokens(total_tokens);
+    int max_tokens = tokens.size();
+    llama_token* tokens_ptr = tokens.data();
+    for (size_t i = 0; i < prompts.size(); ++i) {
+      int num_tokens =
+          llama_tokenize(vocab, prompts[i].data(), prompts[i].size(),
+                         tokens_ptr, max_tokens, true, true);
+      if (num_tokens != prompt_tokens[i]) {
+        LOG(ERROR) << "failed to tokenize the prompt";
+        return std::nullopt;
+      }
+      max_tokens -= num_tokens;
+      tokens_ptr += num_tokens;
     }
 
     return Batch(std::move(tokens), vocab);
@@ -605,9 +618,9 @@ class ModelContext {
   ModelContext& operator=(ModelContext&& other) = default;
 
   // Processes the given `prompt` into the model.
-  bool ProcessPrompt(const std::string& prompt) {
+  bool ProcessPrompt(absl::string_view prompt) {
     std::optional<Batch> prompt_batch_opt =
-        Batch::CreateFromPrompt(vocab_, prompt);
+        Batch::CreateFromPrompt(vocab_, {prompt});
     if (!prompt_batch_opt.has_value()) {
       LOG(ERROR) << "Failed to create batch for prompt.";
       return false;
@@ -626,8 +639,33 @@ class ModelContext {
     }
 
     // TODO: Test
+    const int64_t prompt_decode_end = ggml_time_us();
     LOG(INFO) << "Prompt decode: " << std::setprecision(2)
-              << (ggml_time_us() - prompt_decode_start) / 1e6f << " s";
+              << (prompt_decode_end - prompt_decode_start) / 1e6f << " s";
+
+    return true;
+  }
+
+  bool AddUserMessage(absl::string_view user_message) {
+    const int64_t start_us = ggml_time_us();
+    std::optional<Batch> batch = Batch::CreateFromPrompt(
+        vocab_, {"<|im_start|>user\n", user_message, "\n<|im_end|>\n"});
+
+    if (!batch.has_value()) {
+      LOG(ERROR) << "Failed to create batch for user message: " << user_message;
+      return false;
+    }
+    if (llama_decode(ctx_.get(), batch->Get())) {
+      LOG(ERROR) << "Failed to decode.";
+      return false;
+    }
+
+    // TODO: Test
+    const int64_t end_us = ggml_time_us();
+    LOG(INFO) << "User message processing: " << std::setprecision(2)
+              << (end_us - start_us) / 1e6f << " s";
+    batch->PrintTokens();
+    batch->Print();
 
     return true;
   }
@@ -636,10 +674,25 @@ class ModelContext {
   // sampled result in string.
   std::string SampleUntilEndOfGeneration() {
     const int64_t t_main_start = ggml_time_us();
-    int n_decode = 0;
     std::string result;
 
+    // Prep the model to output assistant response.
+    std::optional<Batch> batch =
+        Batch::CreateFromPrompt(vocab_, {"<|im_start|>assistant\n"});
+    // TODO: Test
+    batch->PrintTokens();
+    batch->Print();
+    if (!batch.has_value()) {
+      LOG(ERROR) << "Failed to create batch for assistant response.";
+      return result;
+    }
+    if (llama_decode(ctx_.get(), batch->Get())) {
+      LOG(ERROR) << "Failed to decode.";
+      return result;
+    }
+
     LOG(INFO) << "Generating tokens:";
+    int n_decode = 0;
     while (true) {
       // sample the next token
       llama_token new_token_id =
@@ -675,11 +728,11 @@ class ModelContext {
     // Make sure we start with a new line after the tokens.
     printf("\n");
 
+    // TODO: The total time currently also includes printing log messages.
     const auto t_main_end = ggml_time_us();
     LOG(INFO) << "Decoded " << n_decode << " tokens in " << std::setprecision(2)
-              << (t_main_end - t_main_start) / 1000000.0f << " s, speed: "
-              << n_decode / ((t_main_end - t_main_start) / 1000000.0f)
-              << " t/s";
+              << (t_main_end - t_main_start) / 1e6f << " s, speed: "
+              << n_decode / ((t_main_end - t_main_start) / 1e6f) << " t/s";
 
     return result;
   }
@@ -717,8 +770,9 @@ ABSL_FLAG(std::string, model, "", "Path to GGUF model.");
 ABSL_FLAG(int, ngl, 99, "Number of layers to offload to GPU.");
 
 int main(int argc, char** argv) {
-  absl::SetProgramUsageMessage(" --model model.gguf [--ngl n_gpu_layers]");
-  absl::ParseCommandLine(argc, argv);
+  absl::SetProgramUsageMessage(
+      " --model model.gguf [--ngl n_gpu_layers] user_message");
+  const std::vector<char*> pos_args = absl::ParseCommandLine(argc, argv);
   absl::InitializeLog();
 
   // Disable the default LogSink to stderr, and use our own color log sink.
@@ -736,8 +790,12 @@ int main(int argc, char** argv) {
   // number of layers to offload to the GPU
   const int ngl = absl::GetFlag(FLAGS_ngl);
 
-  // prompt to generate text from
-  std::string prompt = kPrompt;
+  // User message. pos_args[0] is the application name.
+  if (pos_args.size() < 2) {
+    LOG(ERROR) << "Need user message.";
+    return 1;
+  }
+  const absl::string_view user_message = pos_args[1];
 
   // load dynamic backends
   ggml_backend_load_all();
@@ -750,7 +808,8 @@ int main(int argc, char** argv) {
   }
   ModelContext model_ctx(std::move(model_ctx_opt.value()));
 
-  model_ctx.ProcessPrompt(prompt);
+  model_ctx.ProcessPrompt(kPrompt);
+  model_ctx.AddUserMessage(user_message);
   const std::string result = model_ctx.SampleUntilEndOfGeneration();
 
   LOG(INFO) << "Result:\n" << result;
