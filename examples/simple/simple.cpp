@@ -491,7 +491,7 @@ int main(int argc, char** argv) {
     LOG(ERROR) << "Need user message.";
     return 1;
   }
-  const absl::string_view user_message = pos_args[1];
+  std::string user_message = pos_args[1];
 
   // load dynamic backends
   ggml_backend_load_all();
@@ -508,13 +508,20 @@ int main(int argc, char** argv) {
   model_ctx.AddSystemMessage(kStaticSystemAndToolPrompt);
   model_ctx.TakeSnapshot();
 
-  // Restore the snapshot, add dynamic system prompt, user message, and then
-  // generate the response.
-  model_ctx.RestoreSnapshot();
-  model_ctx.AddSystemMessage("The current time is 2025-12-13 18:03.");
-  model_ctx.AddUserMessage(user_message);
-  const std::string result = model_ctx.SampleUntilEndOfGeneration();
-  LOG(INFO) << "Result:\n" << result;
+  // Main interaction loop.
+  while (!user_message.empty()) {
+    // Restore the snapshot, add dynamic system prompt, user message, and then
+    // generate the response.
+    model_ctx.RestoreSnapshot();
+    model_ctx.AddSystemMessage("The current time is 2025-12-13 18:03.");
+    model_ctx.AddUserMessage(user_message);
+    const std::string result = model_ctx.SampleUntilEndOfGeneration();
+    LOG(INFO) << "Result:\n" << result;
+
+    // Next user message.
+    printf("User: ");
+    std::getline(std::cin, user_message);
+  }
 
   model_ctx.PrintPerformanceMetric();
   LOG(INFO) << "Done";
