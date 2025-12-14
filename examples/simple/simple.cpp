@@ -10,9 +10,7 @@
 #include "absl/log/log.h"
 #include "absl/log/log_sink_registry.h"
 #include "absl/strings/string_view.h"
-#include "batch.h"
 #include "color_log_sink.h"
-#include "llama.h"
 #include "model_context.h"
 
 namespace {
