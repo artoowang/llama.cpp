@@ -17,7 +17,7 @@
 
 namespace {
 
-const std::string kSystemPrompt = R"(
+const std::string kStaticSystemPrompt = R"(
 You are a voice assistant for Home Assistant.
 Answer questions about the world truthfully.
 Answer in plain text. Keep it simple and to the point.
@@ -57,8 +57,6 @@ Static Context: An overview of the areas and the devices in this smart home:
   domain: switch
 - names: To-do
   domain: todo
-
-Current time is 16:55:02. Today's date is 2025-12-06.
 )";
 
 const std::string kTools = R"(
@@ -448,11 +446,8 @@ const std::string kTools = R"(
 'type': 'function'}
 )";
 
-const std::string kUserMessage = "Timer, one minute.";
-
-const std::string kPrompt = R"(
-<|im_start|>system
-)" + kSystemPrompt + R"(
+const std::string kStaticSystemAndToolPrompt = R"(
+)" + kStaticSystemPrompt + R"(
 
 You may call one or more functions to assist with the user query.
 
@@ -465,7 +460,6 @@ For each function call, return a json object with function name and arguments wi
 <tool_call>
 {'name': <function-name>, 'arguments': <args-json-object>}
 </tool_call>
-<|im_end|>
 )";
 
 }  // namespace
@@ -512,7 +506,8 @@ int main(int argc, char** argv) {
   }
   ModelContext model_ctx(std::move(model_ctx_opt.value()));
 
-  model_ctx.ProcessPrompt(kPrompt);
+  model_ctx.AddSystemMessage(kStaticSystemAndToolPrompt);
+  model_ctx.AddSystemMessage("The current time is 2025-12-13 18:03.");
   model_ctx.AddUserMessage(user_message);
   const std::string result = model_ctx.SampleUntilEndOfGeneration();
 

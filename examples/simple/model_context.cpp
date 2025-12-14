@@ -41,41 +41,14 @@ std::optional<ModelContext> ModelContext::Create(
   return ModelContext(std::move(model), std::move(ctx));
 }
 
-bool ModelContext::ProcessPrompt(absl::string_view prompt) {
-  std::optional<Batch> prompt_batch_opt =
-      Batch::CreateFromPrompt(vocab_, {prompt});
-  if (!prompt_batch_opt.has_value()) {
-    LOG(ERROR) << "Failed to create batch for prompt.";
-    return false;
-  }
-  Batch prompt_batch(std::move(prompt_batch_opt.value()));
-
-  // TODO: Test
-  prompt_batch.PrintTokens();
-  prompt_batch.Print();
-
-  // Evaluate the initial batch with the transformer model.
-  const int64_t prompt_decode_start = ggml_time_us();
-  if (llama_decode(ctx_.get(), prompt_batch.Get())) {
-    LOG(ERROR) << "Failed to eval.";
-    return false;
-  }
-
-  // TODO: Test
-  const int64_t prompt_decode_end = ggml_time_us();
-  LOG(INFO) << "Prompt decode: " << std::setprecision(2)
-            << (prompt_decode_end - prompt_decode_start) / 1e6f << " s";
-
-  return true;
-}
-
 bool ModelContext::AddSystemMessage(absl::string_view system_message) {
   const int64_t start_us = ggml_time_us();
   std::optional<Batch> batch = Batch::CreateFromPrompt(
-      vocab_, {"<|im_start|>user\n", system_message, "\n<|im_end|>\n"});
+      vocab_, {"<|im_start|>system\n", system_message, "\n<|im_end|>\n"});
 
   if (!batch.has_value()) {
-    LOG(ERROR) << "Failed to create batch for user message: " << system_message;
+    LOG(ERROR) << "Failed to create batch for system message: "
+               << system_message;
     return false;
   }
   if (llama_decode(ctx_.get(), batch->Get())) {
@@ -85,7 +58,7 @@ bool ModelContext::AddSystemMessage(absl::string_view system_message) {
 
   // TODO: Test
   const int64_t end_us = ggml_time_us();
-  LOG(INFO) << "User message processing: " << std::setprecision(2)
+  LOG(INFO) << "System message processing: " << std::setprecision(2)
             << (end_us - start_us) / 1e6f << " s";
   batch->PrintTokens();
   batch->Print();
